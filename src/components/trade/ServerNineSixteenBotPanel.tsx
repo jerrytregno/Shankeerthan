@@ -197,7 +197,6 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
       ? (status.lastOptionPrice - status.entryPrice) * status.quantity
       : null);
 
-  const nineFifteenTpPct = status.nineFifteenTakeProfitPct ?? status.nineFifteenTrailArmPct ?? 5;
   const onNineFifteenLeg = status.tradeSlot === "nine-fifteen" && inPosition;
   const onNineSixteenLeg = status.tradeSlot === "nine-sixteen" && inPosition;
   const onTpLimitLeg = onNineFifteenLeg || onNineSixteenLeg;
@@ -207,7 +206,6 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
       ? (livePnl / (status.entryPrice * status.quantity)) * 100
       : null);
 
-  const nineFifteenMarkChange = status.nineFifteenMarkChange ?? null;
   const deployedCapital = status.nineFifteenDeployedCapital ?? null;
   const profitAim = status.nineFifteenTpProfitAim ?? status.pnlTargetAmount ?? null;
   const pnlRemaining = status.nineFifteenPnlRemaining ?? null;
@@ -228,7 +226,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
       case "cancelled":
         return "Cancelled — market backup active";
       case "failed":
-        return `Not placed — market backup at +${nineFifteenTpPct}%`;
+        return "Not placed — market backup active";
       default:
         return "Not armed yet";
     }
@@ -241,37 +239,6 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
     livePnl != null &&
     livePnl >= status.pnlTargetAmount &&
     onTpLimitLeg;
-
-  const hardStopPoints = status.hardStopPoints ?? 30;
-  const hardStopStartLabel = status.hardStopStartLabel ?? "10:00";
-  const isPeLeg = status.leg === "PE_BUY" || (status.leg?.startsWith("PE") ?? false);
-  const isCeLeg = status.leg === "CE_BUY" || (status.leg?.startsWith("CE") ?? false);
-  const hardStopSpot =
-    status.hardStopSpot ??
-    (status.entrySpot != null && status.entrySpot > 0 && status.leg
-      ? isCeLeg
-        ? status.entrySpot - hardStopPoints
-        : status.entrySpot + hardStopPoints
-      : null);
-  const hardStopBreached =
-    inPosition &&
-    Boolean(status.hardStopActive) &&
-    status.lastSpot != null &&
-    status.lastSpot > 0 &&
-    hardStopSpot != null &&
-    (isCeLeg
-      ? status.lastSpot <= hardStopSpot
-      : isPeLeg
-        ? status.lastSpot >= hardStopSpot
-        : false);
-  const ptsToHardStop =
-    inPosition && status.lastSpot != null && status.lastSpot > 0 && hardStopSpot != null
-      ? isPeLeg
-        ? hardStopSpot - status.lastSpot
-        : isCeLeg
-          ? status.lastSpot - hardStopSpot
-          : null
-      : null;
 
   const pnlBlockClass =
     livePnl == null
@@ -314,174 +281,10 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
         <div className="ms-bot-warn ms-bot-warn--hold">
           <strong>
             {status.tradeSlot === "nine-fifteen" && inPosition ? "In the 9:15 trade." : "9:15 trade armed."}
-          </strong>{" "}
-          {status.nineFifteenMarkPrice != null && nineFifteenMarkChange != null ? (
-            <>
-              9:15:10 read {formatNumber(status.nineFifteenMarkPrice, 2)} against the open{" "}
-              {formatNumber(status.open915 ?? 0, 2)} · Δ {nineFifteenMarkChange >= 0 ? "+" : ""}
-              {formatNumber(nineFifteenMarkChange, 2)} pts —{" "}
-              {nineFifteenMarkChange <= -5
-                ? "red ≥ 5 pts, buying the ATM PE"
-                : nineFifteenMarkChange >= 10
-                  ? "green ≥ 10 pts, buying the ATM CE"
-                  : nineFifteenMarkChange < 0
-                    ? "red but under 5 pts, no 9:15 trade"
-                    : nineFifteenMarkChange === 0
-                      ? "flat, no 9:15 trade"
-                      : "green but under 10 pts, no 9:15 trade"}
-              .
-            </>
-          ) : (
-            <>Waiting for the 9:15:10 read.</>
-          )}
-          {status.nineFifteenNote && <> {status.nineFifteenNote}.</>}
+          </strong>
           {status.nineFifteenBlocked916 && <> The 9:16 trade is skipped today.</>}
         </div>
       )}
-
-      <div className="ns916-exit-rules">
-        <div className="bb-bot-section">Entry rules (9:15 &amp; 9:16)</div>
-        <div className="pat-metric-grid">
-          <div className="pat-metric">
-            <span className="pat-metric-label">Sizing</span>
-            <span className="pat-metric-value">Full balance · 25 lots/order</span>
-            <span className="pat-metric-hint">
-              Total lots = floor(available ÷ (LTP × lot size)). Larger sizes split into parallel Kite orders of max{" "}
-              <strong>25 lots</strong> each (e.g. 27 lots → <strong>25 + 2</strong> orders, one leg).
-            </span>
-          </div>
-          <div className="pat-metric">
-            <span className="pat-metric-label">Entry order</span>
-            <span className="pat-metric-value">9:15 market · 9:16 limit</span>
-            <span className="pat-metric-hint">
-              <strong>9:15:11</strong> — <strong>NRML market BUY</strong> (REST LTP sizing, fast fill).{" "}
-              <strong>9:16:01</strong> — websocket CE + PE from <strong>9:15:58</strong>;{" "}
-              <strong>NRML limit BUY</strong> at the 2nd option tick in that second (size on the lower of 1st + 2nd;
-              ≥3% spike logged; market backup in 8s). Take-profit exits are <strong>LIMIT sells</strong> rounded to
-              nearest <strong>₹0.05</strong>.
-            </span>
-          </div>
-          <div className="pat-metric">
-            <span className="pat-metric-label">Margin retry</span>
-            <span className="pat-metric-value">Top-up + downsize</span>
-            <span className="pat-metric-hint">
-              If a chunk is rejected, missing qty is topped up until <strong>9:15:20</strong> /{" "}
-              <strong>9:16:30</strong>. On insufficient margin at <strong>9:15:11</strong>, lot count steps down
-              instantly (25 → 24 → 23…) until <strong>9:15:15</strong> using Kite&apos;s required vs available figures.
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div className="ns916-exit-rules">
-        <div className="bb-bot-section">Exit rules (9:15 &amp; 9:16)</div>
-        <div className="pat-metric-grid">
-          <div className="pat-metric">
-            <span className="pat-metric-label">P&amp;L exit</span>
-            <span className="pat-metric-value">
-              {onNineFifteenLeg
-                ? `9:15 · +${nineFifteenTpPct}% limit`
-                : onNineSixteenLeg
-                  ? `9:16 · +${nineFifteenTpPct}% limit`
-                  : "9:16 · PE +5% / +7% · CE +3% limit"}
-            </span>
-            <span className="pat-metric-hint">
-              {onNineFifteenLeg ? (
-                <>
-                  Target is <strong>+{nineFifteenTpPct}% profit on capital deployed</strong> (entry premium × qty
-                  {status.leg === "CE_BUY"
-                    ? " — CE 3% every day"
-                    : " — PE Mon/Tue 5% · Wed/Thu/Fri 3%"}
-                  ). On fill at
-                  9:15:11 a resting{" "}
-                  <strong>limit sell</strong> (not market) is placed at the tick-rounded price for that %; retries
-                  instantly if Kite rejects placement
-                  {status.nineFifteenTpLimitPrice != null
-                    ? ` (limit ₹${formatNumber(status.nineFifteenTpLimitPrice, 2)} per unit today)`
-                    : ""}
-                  . <strong>Market backup</strong> at the same +{nineFifteenTpPct}% if P&amp;L prints before the
-                  limit fills. <strong>Small-body exit</strong> — if the 9:15 WS close has |Δ| &lt; 5 and the leg
-                  is still open, market exit on the first Nifty WS tick at <strong>9:16:01</strong> (any P&amp;L).{" "}
-                  <strong>3:25 PM</strong> square-off if still open.
-                </>
-              ) : onNineSixteenLeg ? (
-                <>
-                  Target is <strong>+{nineFifteenTpPct}% profit on capital deployed</strong> (
-                  {status.leg === "CE_BUY" ? (
-                    <>
-                      CE <strong>3%</strong> every day
-                    </>
-                  ) : (
-                    <>
-                      PE Mon/Wed/Thu <strong>5%</strong> · Tue/Fri <strong>7%</strong>
-                    </>
-                  )}
-                  ). On fill at 9:16:01 a resting{" "}
-                  <strong>limit sell</strong> is placed; retries instantly if Kite rejects
-                  {status.nineFifteenTpLimitPrice != null
-                    ? ` (limit ₹${formatNumber(status.nineFifteenTpLimitPrice, 2)} per unit today)`
-                    : ""}
-                  . <strong>Market backup</strong> at the same % if price prints before the limit fills.
-                  {status.leg === "CE_BUY" ? (
-                    <>
-                      Parallel <strong>flat +12/+8/+6 Nifty index exit</strong> (+12 or +8 until 9:17:00; if the 9:16
-                      minute closes red, retarget to <strong>+6 from 9:17:00</strong>)
-                    </>
-                  ) : (
-                    <>
-                      Parallel <strong>flat −12/−8/−6 Nifty index exit</strong> (−12 or −8 until 9:17:00; if the 9:16
-                      minute closes green, retarget to <strong>−6 from 9:17:00</strong>)
-                    </>
-                  )}{" "}
-                  runs alongside — <strong>first wins</strong>. <strong>3:25 PM</strong> square-off.
-                </>
-              ) : (
-                <>
-                  9:16 take-profit on <strong>capital deployed</strong>: PE Mon/Wed/Thu <strong>+5%</strong> · Tue/Fri{" "}
-                  <strong>+7%</strong> · CE <strong>+3%</strong> every day — resting limit sell with instant retries;
-                  market backup at the same %;
-                  parallel index exit — PE: flat <strong>−12</strong> (both red) / <strong>−8</strong> (green gap),{" "}
-                  <strong>−6</strong> from 9:17:00 if the 9:16 minute closes green · CE: flat <strong>+12</strong> (both
-                  green) / <strong>+8</strong> (red gap), <strong>+6</strong> from 9:17:00 if the 9:16 minute closes red.{" "}
-                  <strong>3:25 PM</strong> square-off.
-                </>
-              )}
-            </span>
-          </div>
-          {onNineSixteenLeg && status.indexExitSchedule && (
-            <div className="pat-metric pat-metric--highlight">
-              <span className="pat-metric-label">Parallel index exit</span>
-              <span className="pat-metric-value">
-                {status.targetSpot != null ? formatNumber(status.targetSpot, 2) : "—"}
-              </span>
-              <span className="pat-metric-hint">
-                {status.indexExitSchedule}
-                {status.niftyPointsToTarget != null
-                  ? ` · ${formatNumber(status.niftyPointsToTarget, 2)} pts until target (market sell)`
-                  : " · market sell when Nifty hits target"}
-              </span>
-            </div>
-          )}
-          <div className="pat-metric pat-metric--highlight">
-            <span className="pat-metric-label">Hard stop</span>
-            <span className="pat-metric-value">
-              {hardStopStartLabel} · ±{hardStopPoints} pts adverse
-            </span>
-            <span className="pat-metric-hint">
-              From {hardStopStartLabel} IST, exit at market if Nifty is {hardStopPoints} pts against the entry
-              spot — PE when spot ≥ entry + {hardStopPoints}, CE when spot ≤ entry − {hardStopPoints}. Applies to
-              both the 9:15 and 9:16 legs (runs alongside take-profit limit; first wins).
-            </span>
-          </div>
-          <div className="pat-metric">
-            <span className="pat-metric-label">Square-off</span>
-            <span className="pat-metric-value">3:25 PM IST</span>
-            <span className="pat-metric-hint">
-              Any leg still open at the intraday cutoff is squared off at market.
-            </span>
-          </div>
-        </div>
-      </div>
 
       <div className="pat-status-row">
         {inPosition && (
@@ -500,14 +303,6 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
           {status.sessionConnected ? "Kite session saved" : "Kite not connected"}
         </span>
         <span className="pat-scan-note pat-scan-note--watch">{status.message}</span>
-        {hardStopBreached && (
-          <span className="pat-badge pat-badge--closed">Hard stop breached — bot exiting</span>
-        )}
-        {status.hardStopActive && !hardStopBreached && hardStopSpot != null && inPosition && (
-          <span className="pat-badge pat-badge--off">
-            Hard stop live · exit if Nifty {isPeLeg ? "≥" : "≤"} {formatNumber(hardStopSpot, 2)}
-          </span>
-        )}
       </div>
 
       {status.nineFifteenSettled && status.nineFifteenNote?.startsWith("TRADE EXITED") && (
@@ -538,8 +333,8 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
           </div>
           {onTpLimitLeg && deployedCapital != null && (
             <p className="pat-pnl-sub">
-              Deployed {formatCurrency(deployedCapital)} · profit aim +{nineFifteenTpPct}% (
-              {profitAim != null ? formatCurrency(profitAim) : "—"})
+              Deployed {formatCurrency(deployedCapital)} · profit aim{" "}
+              {profitAim != null ? formatCurrency(profitAim) : "—"}
               {pnlRemaining != null && pnlRemaining > 0
                 ? ` · ${formatCurrency(pnlRemaining)} to target`
                 : pnlTargetReached
@@ -568,7 +363,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
             </p>
           )}
           {onTpLimitLeg && pnlTargetReached && (
-            <span className="pat-badge pat-badge--on">+{nineFifteenTpPct}% profit aim reached</span>
+            <span className="pat-badge pat-badge--on">Profit aim reached</span>
           )}
         </div>
       )}
@@ -588,11 +383,6 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
               <span className="pat-stat-label">Nifty spot at entry</span>
               <span className="pat-stat-value">
                 {status.entrySpot != null ? formatNumber(status.entrySpot, 2) : "—"}
-              </span>
-              <span className="pat-stat-hint">
-                reference · take-profit limit on capital deployed · {hardStopStartLabel} hard stop ±
-                {hardStopPoints} pts
-                {status.exitMode === "main" ? " · main entry (|Δ| ≥ 15)" : ""}
               </span>
             </div>
             {status.open915 != null && (
@@ -630,25 +420,19 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
               </span>
             </div>
             <div className="pat-stat">
-              <span className="pat-stat-label">
-                {onTpLimitLeg ? `Take-profit (+${status.pnlTargetPct}%)` : "Take-profit"}
-              </span>
+              <span className="pat-stat-label">Take-profit</span>
               <span className={cn("pat-stat-value", pnlTargetReached && "text-up")}>
                 {status.pnlTargetAmount != null ? formatCurrency(status.pnlTargetAmount) : "—"}
               </span>
-              <span className="pat-stat-hint">
-                {onTpLimitLeg ? (
-                  <>
-                    Resting limit
-                    {status.nineFifteenTpLimitPrice != null
-                      ? ` @ ₹${formatNumber(status.nineFifteenTpLimitPrice, 2)}`
-                      : ""}
-                    {livePnlPct != null ? ` · now ${livePnlPct >= 0 ? "+" : ""}${formatNumber(livePnlPct, 2)}%` : ""}
-                  </>
-                ) : (
-                  <>PE Mon/Wed/Thu +5% · Tue/Fri +7% · CE +3% on capital deployed</>
-                )}
-              </span>
+              {onTpLimitLeg && (
+                <span className="pat-stat-hint">
+                  Resting limit
+                  {status.nineFifteenTpLimitPrice != null
+                    ? ` @ ₹${formatNumber(status.nineFifteenTpLimitPrice, 2)}`
+                    : ""}
+                  {livePnlPct != null ? ` · now ${livePnlPct >= 0 ? "+" : ""}${formatNumber(livePnlPct, 2)}%` : ""}
+                </span>
+              )}
             </div>
             {onTpLimitLeg && (
               <div
@@ -661,7 +445,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                     "ns916-stat-tp-order--warn",
                 )}
               >
-                <span className="pat-stat-label">Limit sell (+{nineFifteenTpPct}% TP)</span>
+                <span className="pat-stat-label">Take-profit limit sell</span>
                 <span className="pat-stat-value">{tpStatusLabel()}</span>
                 <span className="pat-stat-hint">
                   {status.nineFifteenTpLimitPrice != null
@@ -679,27 +463,6 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                 </span>
               </div>
             )}
-            <div
-              className={cn(
-                "pat-stat ns916-stat-hard-stop",
-                status.hardStopActive && "ns916-stat-hard-stop--active",
-                hardStopBreached && "ns916-stat-hard-stop--breach",
-              )}
-            >
-              <span className="pat-stat-label">Hard stop (from {hardStopStartLabel})</span>
-              <span className={cn("pat-stat-value", hardStopBreached && "text-down")}>
-                {hardStopSpot != null ? formatNumber(hardStopSpot, 2) : "—"}
-              </span>
-              <span className="pat-stat-hint">
-                {status.hardStopActive
-                  ? hardStopBreached
-                    ? "Breached — bot exiting at market"
-                    : ptsToHardStop != null && ptsToHardStop > 0
-                      ? `${formatNumber(ptsToHardStop, 2)} pts until stop (Nifty ${isPeLeg ? "≥" : "≤"} ${formatNumber(hardStopSpot ?? 0, 2)})`
-                      : `Exit if Nifty ${isPeLeg ? "≥" : "≤"} ${formatNumber(hardStopSpot ?? 0, 2)}`
-                  : `Arms at ${hardStopStartLabel} IST · ${hardStopPoints} pts adverse from entry`}
-              </span>
-            </div>
           </div>
         </div>
       )}
@@ -866,34 +629,16 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
         </div>
       )}
 
-      <p className="pat-idle-note text-muted">
-        <strong>9:15 trade</strong> (always on server): first tick at 9:15:00 = open; last tick before 9:15:10 vs
-        open — red ≥ <strong>5 pts</strong> → <strong>NRML market BUY</strong> ATM PE · green ≥ <strong>10 pts</strong>{" "}
-        → ATM CE at 9:15:11 (full balance, split <strong>25 lots</strong> per order). Exit: <strong>limit sell</strong>{" "}
-        <strong>PE Mon/Tue 5%</strong> · <strong>Wed/Thu/Fri 3%</strong> · <strong>CE 3% all days</strong> on capital deployed;{" "}
-        <strong>market backup at the same %</strong>; if WS 9:15 close
-        |Δ| &lt; 5 and still open → <strong>market exit on first Nifty WS tick @ 9:16:01</strong>;{" "}
-        <strong>3:25 PM</strong> square-off.
-        <br />
-        <br />
-        <strong>9:16 trade</strong> (armed on server): 9:15 WS close − open = Δ · flat or |Δ| &lt; 15 → skip ·{" "}
-        <strong>|Δ| ≥ 15</strong> → red buys ATM PE, green buys ATM CE · <strong>NRML limit BUY</strong> at the 2nd
-        option WS tick @{" "}
-        <strong>9:16:01</strong> (CE + PE WS from 9:15:58 · size on lower tick · market backup in 8s · retries until{" "}
-        <strong>9:16:30</strong>). Skipped if the 9:15 leg is still open at 9:16:00. Exit: limit sell{" "}
-        PE <strong>+5% Mon/Wed/Thu</strong> · <strong>+7% Tue/Fri</strong> · CE <strong>+3% every day</strong> on
-        capital deployed; market backup;{" "}
-        parallel flat <strong>−12</strong> / <strong>−8</strong> (PE) or <strong>+12</strong> / <strong>+8</strong> (CE)
-        until 9:17:00; if the 9:16 minute closes against the leg, retarget to <strong>−6</strong> / <strong>+6</strong>{" "}
-        from 9:17:00 — Nifty index exit via <strong>market sell</strong> (first wins vs TP limit);{" "}
-        <strong>3:25 PM</strong> square-off.
-        {lastLiveAt && inPosition && (
-          <> Last tick {getIndianMarketContext(new Date(lastLiveAt)).timeIST} IST.</>
-        )}
-        {status.sessionAgeHours != null && status.sessionAgeHours > 20 && (
-          <> Session age {formatNumber(status.sessionAgeHours, 1)}h — reconnect before tomorrow.</>
-        )}
-      </p>
+      {((lastLiveAt && inPosition) || (status.sessionAgeHours != null && status.sessionAgeHours > 20)) && (
+        <p className="pat-idle-note text-muted">
+          {lastLiveAt && inPosition && (
+            <>Last tick {getIndianMarketContext(new Date(lastLiveAt)).timeIST} IST.</>
+          )}
+          {status.sessionAgeHours != null && status.sessionAgeHours > 20 && (
+            <> Session age {formatNumber(status.sessionAgeHours, 1)}h — reconnect before tomorrow.</>
+          )}
+        </p>
+      )}
     </section>
   );
 }

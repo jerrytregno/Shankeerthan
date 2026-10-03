@@ -1,8 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, History, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, History, RefreshCw } from "lucide-react";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { useAuth } from "@/contexts/auth-context";
-import { deleteTradeLog, subscribeTradeLogs, syncServerTradesToFirestore } from "@/lib/trade-log-firestore";
+import { subscribeTradeLogs, syncServerTradesToFirestore } from "@/lib/trade-log-firestore";
 import {
   tradeCharges,
   tradeGrossPnl,
@@ -175,13 +175,9 @@ function BrokerFillsBlock({ trade }: { trade: BotTradeLog }) {
 
 function TradeDetailPanel({
   trade,
-  onDelete,
-  deleting,
   afterCharges,
 }: {
   trade: BotTradeLog;
-  onDelete: (trade: BotTradeLog) => void;
-  deleting: boolean;
   afterCharges: boolean;
 }) {
   const charges = afterCharges ? tradeCharges(trade) : null;
@@ -307,22 +303,6 @@ function TradeDetailPanel({
         <p className="trade-skip-banner">{trade.message}</p>
       )}
 
-      <div className="trade-delete-row">
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm trade-delete-btn"
-          disabled={deleting}
-          onClick={() => onDelete(trade)}
-        >
-          <Trash2 size={14} />
-          {deleting ? "Deleting…" : "Delete this log"}
-        </button>
-        <span className="text-muted text-sm">
-          Removes it from Firebase and the server. Use it for a record that never matched a real
-          trade, such as a leg one bot booked from another bot&apos;s position.
-        </span>
-      </div>
-
       {trade.logs.length > 0 && (
         <div className="trade-log-block">
           <span className="trade-detail-label">Session log</span>
@@ -352,15 +332,11 @@ function TradeLogsTable({
   rows,
   expandedId,
   onToggle,
-  onDelete,
-  deletingId,
   afterCharges,
 }: {
   rows: BotTradeLog[];
   expandedId: string | null;
   onToggle: (id: string) => void;
-  onDelete: (trade: BotTradeLog) => void;
-  deletingId: string | null;
   afterCharges: boolean;
 }) {
   return (
@@ -452,12 +428,7 @@ function TradeLogsTable({
                 {expanded && (
                   <tr className="trade-detail-row">
                     <td colSpan={12}>
-                      <TradeDetailPanel
-                        trade={trade}
-                        onDelete={onDelete}
-                        deleting={deletingId === trade.id}
-                        afterCharges={afterCharges}
-                      />
+                      <TradeDetailPanel trade={trade} afterCharges={afterCharges} />
                     </td>
                   </tr>
                 )}
@@ -480,8 +451,6 @@ export default function TradePage() {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
   const [afterCharges, setAfterCharges] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-
   const sync = useCallback(async () => {
     if (!user?.uid) return;
     setSyncing(true);
@@ -585,26 +554,6 @@ export default function TradePage() {
   const toggleExpanded = useCallback((id: string) => {
     setExpandedId((prev) => (prev === id ? null : id));
   }, []);
-
-  const handleDelete = useCallback(
-    async (trade: BotTradeLog) => {
-      if (!user?.uid) return;
-      const label = `${trade.dateIST} · ${sourceLabel(trade.source)} · ${trade.tradingsymbol ?? "session"}`;
-      if (!window.confirm(`Delete this trade log?\n\n${label}\n\nThis cannot be undone.`)) return;
-
-      setDeletingId(trade.id);
-      setError(null);
-      try {
-        await deleteTradeLog(user.uid, trade.id);
-        setExpandedId((prev) => (prev === trade.id ? null : prev));
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Delete failed");
-      } finally {
-        setDeletingId(null);
-      }
-    },
-    [user?.uid],
-  );
 
   return (
     <DashboardShell>
@@ -733,8 +682,6 @@ export default function TradePage() {
               rows={mainTrades}
               expandedId={expandedId}
               onToggle={toggleExpanded}
-              onDelete={(trade) => void handleDelete(trade)}
-              deletingId={deletingId}
               afterCharges={afterCharges}
             />
           )}
@@ -753,8 +700,6 @@ export default function TradePage() {
                 rows={errorTrades}
                 expandedId={expandedId}
                 onToggle={toggleExpanded}
-                onDelete={(trade) => void handleDelete(trade)}
-                deletingId={deletingId}
                 afterCharges={afterCharges}
               />
             </div>

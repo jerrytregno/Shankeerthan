@@ -45,7 +45,6 @@ import {
   loadBrokerFillsSnapshot,
   reconcileBrokerFillsWithSession,
 } from "./broker-trades.js";
-import { deleteBotTradeLog } from "./bot-trade-log.js";
 import {
   clearNiftyLogTest,
   getNiftyLogTestStatus,
@@ -87,6 +86,23 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
+/** Backtest studies withheld from the shipped app; their pages are not routed in the client either. */
+const DISABLED_API_PATHS = new Set([
+  "/api/kite/nine-fifteen-candles",
+  "/api/kite/index-session-minutes",
+  "/api/kite/nine-fifteen-high-minus5-backtest",
+  "/api/kite/nifty-one-hour-backtest",
+  "/api/kite/nifty-rsi-speed-backtest",
+  "/api/kite/nifty-rsi-backtest",
+]);
+
+app.use((req, res, next) => {
+  if (DISABLED_API_PATHS.has(req.path.toLowerCase().replace(/\/+$/, ""))) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  next();
+});
 
 function getKiteConfig() {
   const apiKey = process.env.KITE_API_KEY;
@@ -851,21 +867,6 @@ app.post("/api/trades/reconcile", async (_req, res) => {
     return res.json({ data: store.trades, meta: { updatedAt: store.updatedAt, reconcile: result } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to reconcile with Zerodha";
-    return res.status(500).json({ error: message });
-  }
-});
-
-/** Destructive, so it answers only the signed-in app user. */
-app.delete("/api/trades/:id", async (req, res) => {
-  if (!(await isRequestFromSignedInUser(req))) {
-    return res.status(401).json({ error: "Sign in to the app first" });
-  }
-  try {
-    const { removed, store } = await deleteBotTradeLog(req.params.id);
-    if (!removed) return res.status(404).json({ error: "Trade log not found" });
-    return res.json({ data: store.trades, meta: { updatedAt: store.updatedAt } });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to delete trade log";
     return res.status(500).json({ error: message });
   }
 });

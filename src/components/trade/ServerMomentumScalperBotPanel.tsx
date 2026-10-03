@@ -13,15 +13,6 @@ interface ExitRuleSummary {
   hardStopPnlPct: number;
 }
 
-const STANDARD_RULES_FALLBACK: ExitRuleSummary = {
-  armPct: 1,
-  stepPct: 0,
-  initialStopPnlPct: -2,
-  initialStopHoldSec: 3,
-  stopBreachInclusive: true,
-  hardStopPnlPct: 0,
-};
-
 interface BotStatus {
   enabled: boolean;
   serverDisabled?: boolean;
@@ -129,19 +120,10 @@ export function ServerMomentumScalperBotPanel({ connected }: { connected: boolea
     return () => clearInterval(interval);
   }, [connected, load, status?.phase, status?.wsConnected]);
 
-  const rules = status?.rules;
-  const minMove = rules?.minMovePts ?? 2;
-  const standardRules = status?.exitRules?.standard ?? STANDARD_RULES_FALLBACK;
-  const initialStopPnl = status?.initialStopPnlPct ?? standardRules.initialStopPnlPct;
-  const initialStopHoldSec = status?.initialStopHoldSec ?? standardRules.initialStopHoldSec;
-  const scanClose = rules?.tradeWindowCloseIst ?? "15:30";
   const scanSchedule = status?.scanStartIst ?? "after 9:16:30–15:30";
   const profitExitPrice = status?.profitExitPrice ?? null;
   const maxLots = status?.maxLots ?? 25;
   const plannedLots = status?.plannedLots ?? null;
-  const premiumSafetyPct = status?.premiumSafetyPct ?? 2;
-  const forceExit = status?.forceExitIst ?? "15:25";
-  const pnlArm = status?.pnlArmPct ?? standardRules.armPct;
 
   if (!connected) {
     return (
@@ -170,10 +152,7 @@ export function ServerMomentumScalperBotPanel({ connected }: { connected: boolea
           <Server size={18} />
           <div>
             <h2 className="pat-title">Traps — server bot</h2>
-            <p className="pat-sub">
-              Runs on Lightsail · <strong>websocket only</strong> for Nifty 1-min bars (no historical candle
-              API) · Kite WS 9:00–16:00 IST
-            </p>
+            <p className="pat-sub">Runs on the server · Kite websocket 9:00–16:00 IST</p>
           </div>
         </div>
         <div className="pat-head-actions">
@@ -198,115 +177,14 @@ export function ServerMomentumScalperBotPanel({ connected }: { connected: boolea
       </header>
 
       <div className="ms-bot-instructions">
-        <p className="ms-bot-instructions-title">
-          How it works (live: market entry on the momentum candle)
-        </p>
         <ol className="ms-bot-instructions-list">
           <li>
             <strong>Manual arm only.</strong> Traps starts <strong>disabled</strong> every day — press{" "}
             <strong>Enable</strong> in this panel to arm it. Nothing runs until you do.
           </li>
           <li>
-            <strong>Scan window — {scanSchedule} IST.</strong> When armed, new entries start{" "}
-            <strong>after the 9:16 trade finishes (9:16:30)</strong> through{" "}
-            <strong>{scanClose}</strong> IST. A trade still open at cutoff keeps running until its own
-            exit.
-          </li>
-          <li>
-            <strong>Signal candle:</strong> the minute is sized by its{" "}
-            <strong>high − low</strong>, not its body — every tick of the minute comes off the
-            websocket, so the true extremes are known rather than guessed from the first and last
-            print. A candle that ran at least <strong>{minMove}</strong> pts high to low is a setup,
-            and the <strong>body picks the side</strong>: green → CE, red → PE. A minute that closes
-            exactly where it opened has no colour and is skipped however wide it ran.
-          </li>
-          <li>
-            <strong>RSI filter.</strong> Wilder RSI(14) on Nifty 1-min closes from{" "}
-            <strong>Zerodha historical candles</strong> must sit between{" "}
-            <strong>{status?.liveRsiBucketsIst ?? "40–60"}</strong> (inclusive) when the signal candle
-            closes and again when the pullback entry fires. Outside that band → no trade.
-          </li>
-          <li>
-            <strong>First-second gate on candle 2.</strong> The signal minute&apos;s{" "}
-            <strong>last websocket tick</strong> is compared to every tick in the next minute&apos;s{" "}
-            <strong>first second</strong>. Green needs any tick ≥ last + <strong>0.1</strong>; red needs
-            any tick ≤ last − <strong>0.1</strong>. If none reach it in that second, the setup is dropped.
-          </li>
-          <li>
-            <strong>Pullback entry.</strong> Once the gate passes, the start price is the first tick of
-            candle 2. Green waits for a <strong>2 pt drop</strong> from start →{" "}
-            <strong>CE market buy</strong>. Red waits for a <strong>2 pt gain</strong> from start →{" "}
-            <strong>PE market buy</strong>.
-          </li>
-          <li>
-            <strong>Two losses stop the day.</strong> If two Traps trades close at a loss (negative
-            premium P&amp;L), the bot disables itself for the rest of that session and does not take new
-            setups until the next trading day. One loss keeps scanning.
-          </li>
-          <li>
-            <strong>ATM at pullback.</strong> The strike is chosen from the live Nifty spot when the
-            2-pt pullback prints — not from the signal candle close.
-          </li>
-          <li>
-            <strong>Short of margin → smaller, not skipped.</strong> Sizing runs off the last traded
-            price with a small premium buffer; a refusal for funds is treated as a sizing miss: the
-            order is re-sent a size down until it fits. A refusal that already filled part of the
-            quantity is never retried — those lots are held and managed as the position.
-          </li>
-          <li>
-            <strong>Take profit at entry.</strong> The moment the MIS market buy fills, a resting{" "}
-            <strong>limit sell at +{pnlArm}%</strong> on capital deployed is placed on Kite
-            {profitExitPrice != null ? ` (≈ ₹${formatNumber(profitExitPrice, 2)} per unit today)` : ""}.
-            Retries instantly if Kite rejects placement.
-          </li>
-          <li>
-            <strong>Stop loss — −2% for 3 seconds.</strong> While in position, P&amp;L at or below{" "}
-            <strong>{initialStopPnl}%</strong> must hold for{" "}
-            <strong>{initialStopHoldSec} continuous seconds</strong> before a market sell. Recover above
-            {initialStopPnl}% in that window and the timer resets. Exits use <strong>option P&amp;L % only</strong>.
-          </li>
-          <li>
-            <strong>Market backup at +{pnlArm}%.</strong> If the limit has not filled and unrealised P&amp;L
-            reaches the same <strong>+{pnlArm}%</strong> target, the bot squares off at market.
-          </li>
-          <li>
-            <strong>Stops cross at market.</strong> The −2% (3s) stop, market backup, {forceExit}{" "}
-            square-off, and manual close all send plain market sells — no limit.
-          </li>
-          <li>
-            <strong>No new trade until the last one is flat.</strong> If lots are still open after
-            the exit rounds, the bot keeps the position and keeps working it rather than booking the
-            trade and scanning again — so a failed exit can never leave a leg open underneath a
-            fresh entry.
-          </li>
-          <li>
-            <strong>The cutoff never cuts a live trade.</strong> {scanClose} only stops <em>new</em> entries. A
-            position already open keeps running until its limit fills, stop fires, or backup exits. The
-            safety square-off at <strong>{forceExit}</strong> applies because Zerodha auto-squares MIS legs
-            shortly after.
-          </li>
-          <li>
-            <strong>Size — one order, at most {maxLots} lot{maxLots === 1 ? "" : "s"}.</strong> The entry is a
-            single MIS limit order, never split. Whatever the balance would allow beyond{" "}
-            <strong>{maxLots} lot{maxLots === 1 ? "" : "s"}</strong> is left unused on purpose: a second order would
-            leave part of the position outside what the bot tracks and squares off.
-          </li>
-          <li>
-            <strong>The size is settled in the same breath as the order.</strong> Resolving the ATM
-            leg also quotes its premium and reads the balance, so the lot count is priced off the
-            premium the buy is about to pay rather than a quote from a minute earlier. At ₹130.00
-            with a 65-unit lot, 25 lots is ₹130 × 65 × 25 = <strong>₹2,11,250</strong>; if the
-            balance won&apos;t stretch, the lot count comes down right there.
-          </li>
-          <li>
-            <strong>Head-room on sizing.</strong> The limit sits below LTP but charges still apply on top
-            of the quoted premium, so sizing adds <strong>{premiumSafetyPct}%</strong> head-room to keep
-            the order inside the balance.
-          </li>
-          <li>
-            The bot and its websocket only run during the <strong>{scanSchedule}</strong> IST entry
-            windows (or while a position is open). If the server restarts mid-day, only bars{" "}
-            <em>after</em> reconnect are used.
+            <strong>Entry window — {scanSchedule} IST.</strong> A trade still open at the cutoff keeps
+            running until it exits. Two losing trades stop the bot for the day.
           </li>
         </ol>
       </div>
@@ -363,13 +241,6 @@ export function ServerMomentumScalperBotPanel({ connected }: { connected: boolea
           </span>
         </div>
         <div className="pat-metric">
-          <span className="pat-metric-label">RSI(14)</span>
-          <span className="pat-metric-value">
-            {status.liveNiftyRsi != null ? formatNumber(status.liveNiftyRsi, 1) : "—"}
-          </span>
-          <span className="pat-metric-hint">Zerodha 1-min · need {status.liveRsiBucketsIst ?? "40–60"}</span>
-        </div>
-        <div className="pat-metric">
           <span className="pat-metric-label">Trades today</span>
           <span className="pat-metric-value">{status.tradesToday}</span>
         </div>
@@ -380,7 +251,6 @@ export function ServerMomentumScalperBotPanel({ connected }: { connected: boolea
               ? `${plannedLots} lot${plannedLots === 1 ? "" : "s"} armed`
               : `${maxLots} lot${maxLots === 1 ? "" : "s"} max`}
           </span>
-          <span className="pat-metric-hint">single MIS market order · never split</span>
         </div>
         <div className="pat-metric">
           <span className="pat-metric-label">Last bar (WS)</span>
@@ -390,16 +260,12 @@ export function ServerMomentumScalperBotPanel({ connected }: { connected: boolea
           <div className="pat-metric pat-metric--wide">
             <span className="pat-metric-label">Pending signal</span>
             <span className="pat-metric-value">
-              {status.pendingSignal.side} · {status.pendingSignal.signalTimeIst} ·{" "}
-              {Math.abs(status.pendingSignal.movePts)} pt range
+              {status.pendingSignal.side} · {status.pendingSignal.signalTimeIst}
             </span>
             <span className="pat-metric-hint">
-              {status.pendingSignal.liveRsi != null
-                ? `RSI ${formatNumber(status.pendingSignal.liveRsi, 1)} · `
-                : ""}
               {status.pendingSignal.optionMarkPrice != null
                 ? `${status.pendingSignal.optionTradingsymbol ?? "option"} at ₹${status.pendingSignal.optionMarkPrice.toFixed(2)} · buying at market`
-                : "first-second gate → 2 pt pullback entry"}
+                : "waiting for entry"}
             </span>
           </div>
         )}
@@ -418,16 +284,14 @@ export function ServerMomentumScalperBotPanel({ connected }: { connected: boolea
               </span>
             </div>
             <div className="pat-metric">
-              <span className="pat-metric-label">TP limit / stop</span>
+              <span className="pat-metric-label">Take-profit limit</span>
               <span className="pat-metric-value">
-                +{pnlArm}% limit
-                {profitExitPrice != null ? ` @ ₹${formatNumber(profitExitPrice, 2)}` : ""} · stop{" "}
-                {initialStopPnl}% ({initialStopHoldSec}s)
+                {profitExitPrice != null ? `₹${formatNumber(profitExitPrice, 2)}` : "—"}
               </span>
               <span className="pat-metric-hint">
                 {status.profitExitArmed
-                  ? `limit ${status.profitExitOrderStatus ?? "pending"} on Kite · market backup at +${pnlArm}%`
-                  : `limit placed at entry · backup at +${pnlArm}%`}
+                  ? `limit ${status.profitExitOrderStatus ?? "pending"} on Kite`
+                  : "placing limit"}
               </span>
             </div>
             <div className="pat-metric">
