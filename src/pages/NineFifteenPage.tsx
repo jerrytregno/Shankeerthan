@@ -74,7 +74,8 @@ export default function NineFifteenPage() {
                   <strong>Sizing &amp; orders</strong> — full available balance; max <strong>25 lots</strong> per
                   Kite order (split in parallel if larger). <strong>Entry = NRML market BUY</strong> at the live
                   print (fast fill at 9:15:11 — not a limit entry). Sizing uses two REST LTP reads 1s apart
-                  (size on the lower quote).
+                  (size on the lower quote) plus a <strong>3% margin cushion</strong> (Kite blocks margin a little
+                  above the last price for market orders), so the first order is not refused for funds.
                 </li>
                 <li>
                   <strong>Partial fill / margin short</strong> — on insufficient funds at 9:15:11, reduce{" "}
@@ -157,14 +158,13 @@ export default function NineFifteenPage() {
                 </li>
                 <li>
                   <strong>Order at 9:16:01.000</strong> (dedicated timer) · option websocket armed from{" "}
-                  <strong>9:15:58</strong> (ATM CE + PE pre-resolved) · collect the{" "}
-                  <strong>1st and 2nd option websocket ticks in the 9:16:01 second</strong> on the entry leg.
+                  <strong>9:15:58</strong> (ATM CE + PE pre-resolved), so the latest option price is already known —
+                  no waiting for new ticks.
                 </li>
                 <li>
-                  <strong>Entry = NRML limit BUY</strong> at the <strong>2nd tick</strong> (limit price rounded to
-                  nearest <strong>₹0.05</strong>) · size lots on the <strong>lower</strong> of the two ticks · log
-                  if the 1st tick is ≥ <strong>3%</strong> above the 2nd · <strong>market backup in 8s</strong> if
-                  the limit does not fill · retries until <strong>9:16:30</strong>.
+                  <strong>Entry = NRML market BUY</strong> at 9:16:01 · lots sized on the latest option websocket
+                  price plus a <strong>3% margin cushion</strong> (Kite blocks margin a little above the last price
+                  for market orders) · retries until <strong>9:16:30</strong>.
                 </li>
                 <li>
                   <strong>Blocked</strong> when the 9:15 leg is still open at 9:16:00.
@@ -179,7 +179,7 @@ export default function NineFifteenPage() {
                 <li>
                   <strong>Take-profit — LIMIT sell only</strong> (% on capital deployed = entry premium × quantity).
                   Limit price is entry × (1 + weekday %), rounded to the nearest <strong>₹0.05</strong>. The moment
-                  the 9:16 limit entry fills, a resting <strong>limit sell</strong> is placed at that profit aim;
+                  the 9:16 market entry fills, a resting <strong>limit sell</strong> is placed at that profit aim;
                   if Kite rejects placement, the bot retries instantly until the order is accepted.
                   <ul className="nf-live-rules-sublist">
                     <li>
@@ -252,6 +252,16 @@ export default function NineFifteenPage() {
                 </li>
                 <li>
                   <strong>3:25 PM</strong> force square-off if still open.
+                </li>
+                <li>
+                  <strong>How exits fire</strong> — the index exit and hard stop (9:15 and 9:16 legs) are checked on{" "}
+                  <strong>every Nifty websocket tick</strong> (about 4 a second), plus a <strong>1-second safety
+                  check</strong> that runs even if the rest of the bot stalls; they never wait behind a Kite request.
+                  On the triggering tick the take-profit limit is cancelled and the{" "}
+                  <strong>whole position is sold at market</strong> in parallel orders (max 25 lots each, up to 9 at
+                  once); fills are checked every <strong>0.2 s</strong>. If the take-profit limit was just confirmed
+                  unfilled, the sell goes out without waiting for a holdings check — holdings are verified right
+                  after, and any excess sold is bought back immediately.
                 </li>
               </ol>
             </div>

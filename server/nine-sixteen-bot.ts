@@ -75,7 +75,6 @@ import {
 } from "./atm-option.js";
 import {
   formatLotSplitLabel,
-  conservativeEntryLtpFromQuotes,
   fetchConservativeOptionLtpForEntry,
   getMaxLotsPerOrder,
   nextEntryLotsAfterMarginReject,
@@ -103,7 +102,7 @@ import {
   cancelRegularOrder,
   placeRegularLimitOrder,
   placeRegularMarketOrder,
-  waitForOrderComplete,
+  KiteOrderRejectedError,
 } from "./kite-client.js";
 import {
   hasNiftyTickerInstance,
@@ -424,6 +423,14 @@ let lastQuoteRefreshAt = 0;
 let lastPositionSyncAt = 0;
 let quoteRefreshInFlight = false;
 let loopBusy = false;
+/** When the current loop pass took `loopBusy`, and what it is awaiting — for the stall watchdog. */
+let loopStartedAt = 0;
+let loopStep = "";
+let loopStallWarnedAt = 0;
+const LOOP_STALL_WARN_MS = 20_000;
+let exitHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
+/** Order/position sync is REST — only one tick-driven pass at a time. */
+let liveExitCheckInFlight = false;
 const logs: NineSixteenBotStatus["logs"] = [];
 
 /** Once-a-day cache warm (9:00) so the 9:16:01 order path makes no cold calls. */
@@ -809,36 +816,22 @@ function inferExitModeFromCaptures(): NineSixteenExitMode | null {
 const RECONCILE_MIN_INTERVAL_MS = 5_000;
 /** Minimal pause between failed entry attempts (still within 9:16:01–9:16:30). */
 const ENTRY_RETRY_DELAY_MS = 250;
-/** Wait this long for the limit entry before falling back to market. */
-const ENTRY_LIMIT_FILL_TIMEOUT_MS = 8_000;
-/** Wait for the 1st + 2nd option tick at 9:16:01 on websocket. */
-const ENTRY_WS_91601_TICK_TIMEOUT_MS = 3_000;
-/** Retries: any two consecutive option websocket ticks. */
-const ENTRY_WS_CONSECUTIVE_TICK_TIMEOUT_MS = 2_000;
+/**
+ * Fill polling for entries and exits. Kite allows ~10 requests/s and the exit sync shares that
+ * budget, so this stays a little above the 100 ms floor.
+ */
+const ORDER_FILL_POLL_MS = 200;
+const ORDER_FILL_TIMEOUT_MS = 45_000;
+/** An option print older than this is not trusted for sizing; fall back to one REST quote. */
+const ENTRY_WS_LTP_MAX_AGE_MS = 3_000;
+/**
+ * Kite blocks margin for a market buy about 3% above the last print (market protection), so a
+ * full-balance order sized on the raw LTP is refused. Size as if the premium were this much higher.
+ */
+const MARKET_BUY_SIZING_CUSHION = 1.03;
 
-type ConservativeEntryLtp = ReturnType<typeof conservativeEntryLtpFromQuotes> & {
-  firstLtp: number;
-  secondLtp: number;
-  source: "ws-91601" | "ws-consecutive" | "rest";
-};
-
-type EntryLtpTickWait = {
-  instrumentToken: number;
-  /** When set, only ticks in this IST second count (9:16:01). */
-  targetSecOfDay: number | null;
-  prices: number[];
-  resolve: (firstLtp: number, secondLtp: number) => void;
-  reject: (err: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
-};
-
-let entryLtpTickWait: EntryLtpTickWait | null = null;
-/** Prices already seen at 9:16:01 before tryEnter arms — avoids missing the first WS tick. */
-const entry91601TickBuffer = new Map<number, number[]>();
-
-function clearEntry91601TickBuffer() {
-  entry91601TickBuffer.clear();
-}
+/** Latest websocket print per subscribed option — sizes the 9:16:01 market buy without waiting on a tick. */
+const latestOptionTicks = new Map<number, { price: number; atMs: number }>();
 
 function isKnownOptionTickerToken(token: number): boolean {
   return (
@@ -846,66 +839,6 @@ function isKnownOptionTickerToken(token: number): boolean {
     (entryTickerCeToken > 0 && token === entryTickerCeToken) ||
     (entryTickerPeToken > 0 && token === entryTickerPeToken)
   );
-}
-
-function buffer91601EntryTick(tick: NiftyTick) {
-  if (!isKnownOptionTickerToken(tick.instrumentToken) || tick.lastPrice <= 0) return;
-  if (istSecondsOfDay(new Date(tick.receivedAtMs)) !== NINE_SIXTEEN_ENTRY_SEC) return;
-  const buf = entry91601TickBuffer.get(tick.instrumentToken) ?? [];
-  if (buf.length >= 2) return;
-  buf.push(tick.lastPrice);
-  entry91601TickBuffer.set(tick.instrumentToken, buf);
-}
-
-function seeded91601EntryTicks(instrumentToken: number): number[] {
-  return [...(entry91601TickBuffer.get(instrumentToken) ?? [])];
-}
-
-function clearEntryLtpTickWait() {
-  if (!entryLtpTickWait) return;
-  clearTimeout(entryLtpTickWait.timer);
-  entryLtpTickWait = null;
-}
-
-function pushEntryLtpTick(tick: NiftyTick) {
-  const wait = entryLtpTickWait;
-  if (!wait || tick.instrumentToken !== wait.instrumentToken || tick.lastPrice <= 0) return;
-  if (wait.targetSecOfDay != null) {
-    const sec = istSecondsOfDay(new Date(tick.receivedAtMs));
-    if (sec !== wait.targetSecOfDay) return;
-  }
-  wait.prices.push(tick.lastPrice);
-  if (wait.prices.length < 2) return;
-  const resolve = wait.resolve;
-  const [firstLtp, secondLtp] = wait.prices;
-  clearEntryLtpTickWait();
-  resolve(firstLtp, secondLtp);
-}
-
-function waitForEntryLtpTicks(
-  instrumentToken: number,
-  targetSecOfDay: number | null,
-  timeoutMs: number,
-): Promise<{ firstLtp: number; secondLtp: number }> {
-  clearEntryLtpTickWait();
-  const seeded =
-    targetSecOfDay === NINE_SIXTEEN_ENTRY_SEC ? seeded91601EntryTicks(instrumentToken) : [];
-  if (seeded.length >= 2) {
-    return Promise.resolve({ firstLtp: seeded[0], secondLtp: seeded[1] });
-  }
-  return new Promise((resolve, reject) => {
-    entryLtpTickWait = {
-      instrumentToken,
-      targetSecOfDay,
-      prices: seeded,
-      resolve: (firstLtp, secondLtp) => resolve({ firstLtp, secondLtp }),
-      reject,
-      timer: setTimeout(() => {
-        clearEntryLtpTickWait();
-        reject(new Error("Entry option websocket ticks unavailable"));
-      }, timeoutMs),
-    };
-  });
 }
 
 function botTickerInstrumentTokens(): number[] {
@@ -923,46 +856,18 @@ function refreshBotTickerInstruments() {
   if (hasNiftyTickerInstance()) setBotTickerInstruments(tokens);
 }
 
-async function resolveConservativeEntryLtp(
+/** Sizing price for the market buy: the latest websocket print, or one REST quote if it is stale. */
+async function resolveMarketEntryLtp(
   accessToken: string,
   resolved: ResolvedAtmOption,
-  attempt: number,
-): Promise<ConservativeEntryLtp> {
-  refreshBotTickerInstruments();
-
-  const build = (firstLtp: number, secondLtp: number, source: ConservativeEntryLtp["source"]) => ({
-    ...conservativeEntryLtpFromQuotes(firstLtp, secondLtp),
-    firstLtp,
-    secondLtp,
-    source,
-  });
-
-  const nowSec = istSecondsOfDay();
-  if (attempt === 1 && nowSec <= NINE_SIXTEEN_ENTRY_SEC) {
-    try {
-      const { firstLtp, secondLtp } = await waitForEntryLtpTicks(
-        resolved.instrumentToken,
-        NINE_SIXTEEN_ENTRY_SEC,
-        ENTRY_WS_91601_TICK_TIMEOUT_MS,
-      );
-      return build(firstLtp, secondLtp, "ws-91601");
-    } catch {
-      pushLog("9:16:01 WS entry ticks incomplete · trying consecutive WS ticks", "info");
-    }
+): Promise<{ ltp: number; source: "WS" | "REST" }> {
+  const tick = resolved.instrumentToken > 0 ? latestOptionTicks.get(resolved.instrumentToken) : undefined;
+  if (tick && Date.now() - tick.atMs <= ENTRY_WS_LTP_MAX_AGE_MS) {
+    return { ltp: tick.price, source: "WS" };
   }
-
-  try {
-    const { firstLtp, secondLtp } = await waitForEntryLtpTicks(
-      resolved.instrumentToken,
-      null,
-      ENTRY_WS_CONSECUTIVE_TICK_TIMEOUT_MS,
-    );
-    return build(firstLtp, secondLtp, "ws-consecutive");
-  } catch {
-    pushLog("WS entry ticks unavailable · REST fallback", "warning");
-    const rest = await fetchConservativeOptionLtpForEntry(accessToken, resolved.tradingsymbol);
-    return { ...rest, source: "rest" };
-  }
+  const ltp = await fetchOptionLtp(accessToken, resolved.tradingsymbol);
+  if (ltp <= 0) throw new Error("Option LTP unavailable for sizing");
+  return { ltp, source: "REST" };
 }
 /** Parallel SELL rounds attempted per square-off before deferring to the next tick. */
 const SQUARE_OFF_MAX_ROUNDS = 3;
@@ -971,6 +876,8 @@ const SQUARE_OFF_MAX_ROUNDS = 3;
  * of margin step-downs; the entry-window deadline is the real limit.
  */
 const ENTRY_TOP_UP_MAX_ROUNDS = 4;
+/** A take-profit sync older than this is too stale to trust for selling before the holdings read. */
+const TP_SYNC_FRESH_MS = 3_000;
 /** Gap enforced between square-off attempts so tick-driven retries cannot spam orders. */
 const SQUARE_OFF_RETRY_COOLDOWN_MS = 3_000;
 let lastSquareOffAttemptAt = 0;
@@ -1363,8 +1270,7 @@ function resetTickRuntime() {
   openTickAtLabel = null;
   closeTickAtLabel = null;
   optionInstrumentToken = 0;
-  clearEntryLtpTickWait();
-  clearEntry91601TickBuffer();
+  latestOptionTicks.clear();
   refreshBotTickerInstruments();
 }
 
@@ -1437,8 +1343,6 @@ function handleBotTick(tick: NiftyTick) {
   const isNifty =
     !isOption && (niftyInstrumentToken <= 0 || tick.instrumentToken === niftyInstrumentToken);
 
-  buffer91601EntryTick(tick);
-
   if (isNifty) {
     lastSpot = tick.lastPrice;
     liveSpotLatestTick = tick;
@@ -1481,14 +1385,13 @@ function handleBotTick(tick: NiftyTick) {
 
   if (isOption) {
     lastOptionPrice = tick.lastPrice;
+    if (tick.lastPrice > 0) {
+      latestOptionTicks.set(tick.instrumentToken, { price: tick.lastPrice, atMs: tick.receivedAtMs });
+    }
     recordRawTick(tick, "option");
     if (entryPrice > 0 && quantity > 0) {
       unrealisedPnl = (lastOptionPrice - entryPrice) * quantity;
     }
-  }
-
-  if (entryLtpTickWait && tick.instrumentToken === entryLtpTickWait.instrumentToken) {
-    pushEntryLtpTick(tick);
   }
 
   if (phase === "in_position") {
@@ -1908,13 +1811,16 @@ async function placeSplitLimitOrders(
   return { orderIds, failures };
 }
 
-async function cancelLegTakeProfitOrders(accessToken: string): Promise<void> {
-  if (nineFifteenTpOrderIds.length === 0) return;
+/** True when Kite accepted every cancel, i.e. each limit was still open at the moment it was pulled. */
+async function cancelLegTakeProfitOrders(accessToken: string): Promise<boolean> {
+  if (nineFifteenTpOrderIds.length === 0) return false;
+  let allCancelled = true;
   for (const orderId of nineFifteenTpOrderIds) {
     try {
       await cancelRegularOrder(accessToken, orderId);
     } catch {
       /* already filled or cancelled */
+      allCancelled = false;
     }
   }
   if (nineFifteenTpFilledQty <= 0) {
@@ -1922,6 +1828,7 @@ async function cancelLegTakeProfitOrders(accessToken: string): Promise<void> {
   }
   nineFifteenTpOrderIds = [];
   nineFifteenTpPendingQty = Math.max(0, quantity - nineFifteenTpFilledQty);
+  return allCancelled;
 }
 
 async function resolveNineFifteenTakeProfitExitPrice(accessToken: string): Promise<number | null> {
@@ -2171,37 +2078,57 @@ async function pendingOrderQuantity(
   }
 }
 
+/**
+ * Wait for every order to settle with one shared /orders read per poll — a read per order would
+ * multiply Kite requests by the number of split chunks and run into its rate limit.
+ */
 async function awaitOrderFills(
   accessToken: string,
   orderIds: string[],
-  timeoutMs?: number,
+  timeoutMs = ORDER_FILL_TIMEOUT_MS,
 ): Promise<{
   fills: { average_price: number; filled_quantity: number }[];
   failures: Error[];
 }> {
-  const results = await Promise.allSettled(
-    orderIds.map((orderId) => waitForOrderComplete(accessToken, orderId, timeoutMs)),
-  );
   const fills: { average_price: number; filled_quantity: number }[] = [];
   const failures: Error[] = [];
-  for (const result of results) {
-    if (result.status === "fulfilled") {
-      fills.push(result.value);
-    } else {
-      failures.push(result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
-    }
-  }
-  return { fills, failures };
-}
+  const pending = new Set(orderIds);
+  const start = Date.now();
 
-async function cancelOpenOrders(accessToken: string, orderIds: string[]) {
-  for (const orderId of orderIds) {
+  while (pending.size > 0 && Date.now() - start < timeoutMs) {
     try {
-      await cancelRegularOrder(accessToken, orderId);
+      const rows = await fetchOrdersByIds(accessToken, [...pending]);
+      for (const orderId of [...pending]) {
+        const row = rows.get(orderId);
+        if (!row) continue;
+        const status = (row.status ?? "").toUpperCase();
+        if (status === "COMPLETE") {
+          fills.push({
+            average_price: Number(row.average_price) || 0,
+            filled_quantity: Number(row.filled_quantity) || 0,
+          });
+          pending.delete(orderId);
+        } else if (status === "REJECTED" || status === "CANCELLED") {
+          failures.push(
+            new KiteOrderRejectedError({
+              orderId,
+              status,
+              statusMessage: row.status_message?.trim() ?? "",
+              filledQuantity: Number(row.filled_quantity) || 0,
+              averagePrice: Number(row.average_price) || 0,
+            }),
+          );
+          pending.delete(orderId);
+        }
+      }
     } catch {
-      /* already filled or cancelled */
+      /* transient Kite read — poll again */
     }
+    if (pending.size > 0) await new Promise((resolve) => setTimeout(resolve, ORDER_FILL_POLL_MS));
   }
+
+  for (const orderId of pending) failures.push(new Error(`Order ${orderId} fill timeout`));
+  return { fills, failures };
 }
 
 function weightedAverageFillPrice(
@@ -2366,8 +2293,9 @@ async function squareOffAllSplitOrders(
   lotSize: number,
   round: number,
   ownRemainingQty: number,
+  knownBrokerQty?: number,
 ): Promise<{ average_price: number; filled_quantity: number }[]> {
-  const brokerQty = await fetchNetQty(accessToken, symbol, activeKiteProduct());
+  const brokerQty = knownBrokerQty ?? (await fetchNetQty(accessToken, symbol, activeKiteProduct()));
   if (brokerQty <= 0 || ownRemainingQty <= 0) return [];
 
   // Momentum scalper may hold lots in this same contract — only ever sell our own.
@@ -2403,6 +2331,28 @@ async function squareOffAllSplitOrders(
     pushLog(`Exit order did not fill · ${failure.message}`, "warning");
   }
   return fills;
+}
+
+/**
+ * A sell sent before the holdings read can outrun a take-profit fill or a manual exit and leave the
+ * leg short. The bot only ever buys options, so a negative net here is our own oversell.
+ */
+async function buyBackOversoldQty(accessToken: string, symbol: string, lotSize: number, shortQty: number) {
+  const qty = Math.min(shortQty, quantity);
+  if (qty <= 0) return;
+  pushLog(
+    `Exit oversold ${qty} qty (take-profit or manual sell filled first) · buying back at market`,
+    "error",
+  );
+  const { orderIds, failures } = await placeSplitMarketOrders(accessToken, {
+    tradingsymbol: symbol,
+    transaction_type: "BUY",
+    quantities: splitQuantityIntoOrderChunks(qty, lotSize),
+  });
+  for (const failure of failures) {
+    pushLog(`Oversold buy-back rejected · ${failure.message}`, "error");
+  }
+  await awaitOrderFills(accessToken, orderIds);
 }
 
 async function squareOff(accessToken: string, reason: string) {
@@ -2482,20 +2432,35 @@ async function squareOffInner(accessToken: string, reason: string) {
   const symbol = tradingsymbol;
   const lotSize = positionLotSize > 0 ? positionLotSize : 65;
 
-  if (persistsTakeProfitLeg() && nineFifteenTpOrderIds.length > 0) {
-    await cancelLegTakeProfitOrders(accessToken);
-  }
+  // Read before the cancel clears the take-profit tracking.
+  const hadTpOrders = persistsTakeProfitLeg() && nineFifteenTpOrderIds.length > 0;
+  const tpSyncAgeMs = nineFifteenTpLastSyncedAt
+    ? Date.now() - Date.parse(nineFifteenTpLastSyncedAt)
+    : Number.POSITIVE_INFINITY;
+  const tpSeenUnfilled = hadTpOrders && nineFifteenTpFilledQty <= 0 && tpSyncAgeMs <= TP_SYNC_FRESH_MS;
+  const tpCancelledWhileOpen = hadTpOrders ? await cancelLegTakeProfitOrders(accessToken) : false;
 
-  const brokerQty = await fetchNetQty(accessToken, symbol, activeKiteProduct());
-  if (brokerQty <= 0) {
-    await persistTradeLog(dateIst, "closed", "Already flat", { exitReason: reason, pnl: unrealisedPnl });
-    concludeTrade(dateIst, "Already flat", "info");
-    return;
+  // The limit was unfilled moments ago and Kite accepted the cancel, so the full leg is still ours:
+  // sell without waiting on a positions read. The post-sell check below buys back any excess if a
+  // fill slipped in between.
+  const sellBeforeHoldingsCheck = tpSeenUnfilled && tpCancelledWhileOpen;
+
+  let knownBrokerQty: number;
+  if (sellBeforeHoldingsCheck) {
+    knownBrokerQty = quantity;
+  } else {
+    knownBrokerQty = await fetchNetQty(accessToken, symbol, activeKiteProduct());
+    if (knownBrokerQty <= 0) {
+      await persistTradeLog(dateIst, "closed", "Already flat", { exitReason: reason, pnl: unrealisedPnl });
+      concludeTrade(dateIst, "Already flat", "info");
+      return;
+    }
   }
 
   // Track what *we* still owe, not the broker net — another bot's lots in this contract are none
-  // of our business and must survive our square-off.
-  let remainingQty = quantity;
+  // of our business and must survive our square-off. Never more than the broker holds, either: a
+  // partially filled take-profit limit has already sold part of the leg.
+  let remainingQty = Math.min(quantity, knownBrokerQty);
 
   // Keep firing parallel SELL rounds until our own leg is flat — a stuck leg must never be abandoned.
   const fills: { average_price: number; filled_quantity: number }[] = [];
@@ -2507,6 +2472,7 @@ async function squareOffInner(accessToken: string, reason: string) {
         lotSize,
         round,
         remainingQty,
+        round === 1 ? knownBrokerQty : undefined,
       );
       fills.push(...roundFills);
       remainingQty -= roundFills.reduce((sum, fill) => sum + fill.filled_quantity, 0);
@@ -2519,7 +2485,9 @@ async function squareOffInner(accessToken: string, reason: string) {
 
     // A flat broker position means our leg is gone regardless of what the fill reports said.
     try {
-      if ((await fetchNetQty(accessToken, symbol, activeKiteProduct())) <= 0) remainingQty = 0;
+      const netAfter = await fetchNetQty(accessToken, symbol, activeKiteProduct());
+      if (netAfter <= 0) remainingQty = 0;
+      if (netAfter < 0) await buyBackOversoldQty(accessToken, symbol, lotSize, -netAfter);
     } catch {
       /* unknown — trust our own fill accounting */
     }
@@ -2664,7 +2632,7 @@ function entryRetryDelayMs() {
   return ENTRY_RETRY_DELAY_MS;
 }
 
-function nextNineFifteenLotsAfterMarginError(currentLots: number, err: unknown): number {
+function nextLotsAfterMarginError(currentLots: number, err: unknown): number {
   if (currentLots <= 0) return 0;
   const text = err instanceof Error ? err.message : typeof err === "string" ? err : "";
   if (!isInsufficientFundsError(err) && !isMarginRelatedOrderError(text)) return 0;
@@ -2838,9 +2806,12 @@ async function tryEnterNineFifteen(accessToken: string, dateIst: string) {
       let splitLabel = "";
 
       for (let marginRound = 1; marginRound <= 40 && !isPastNineFifteenMarginRetryWindow(); marginRound += 1) {
-        const sizing = await resolveEntryQuantity(accessToken, resolved.lotSize, optionLtp, {
-          maxLots: maxLotsCap,
-        });
+        const sizing = await resolveEntryQuantity(
+          accessToken,
+          resolved.lotSize,
+          optionLtp * MARKET_BUY_SIZING_CUSHION,
+          { maxLots: maxLotsCap },
+        );
         if (sizing.lots <= 0 || sizing.quantity <= 0) {
           lastFailure = `balance too low for 1 lot · need ~₹${Math.ceil(sizing.costPerLot)} · available ₹${Math.floor(sizing.availableBalance)}`;
           break;
@@ -2852,7 +2823,7 @@ async function tryEnterNineFifteen(accessToken: string, dateIst: string) {
         const attemptLabel =
           marginRound === 1 ? String(attempt) : `${attempt} · margin retry ${marginRound}`;
         pushLog(
-          `9:15 entry attempt ${attemptLabel} · ${legLabel} ${resolved.tradingsymbol} @ ₹${optionLtp.toFixed(2)} · ${splitLabel}`,
+          `9:15 entry attempt ${attemptLabel} · ${legLabel} ${resolved.tradingsymbol} @ ₹${optionLtp.toFixed(2)} (sized at ₹${(optionLtp * MARKET_BUY_SIZING_CUSHION).toFixed(2)} incl. margin cushion) · ${splitLabel}`,
           attempt === 1 && marginRound === 1 ? "success" : "info",
         );
 
@@ -2870,7 +2841,7 @@ async function tryEnterNineFifteen(accessToken: string, dateIst: string) {
         if (fills.length === 0) {
           const firstErr = fillFailures[0] ?? placed.failures[0] ?? new Error("All 9:15 entry orders failed");
           lastFailure = firstErr instanceof Error ? firstErr.message : String(firstErr);
-          const nextLots = nextNineFifteenLotsAfterMarginError(lastAttemptLots, firstErr);
+          const nextLots = nextLotsAfterMarginError(lastAttemptLots, firstErr);
           if (nextLots > 0 && !isPastNineFifteenMarginRetryWindow()) {
             maxLotsCap = nextLots;
             pushLog(
@@ -2912,7 +2883,7 @@ async function tryEnterNineFifteen(accessToken: string, dateIst: string) {
       return;
     } catch (err) {
       lastFailure = err instanceof Error ? err.message : "Entry failed";
-      const nextLots = nextNineFifteenLotsAfterMarginError(lastAttemptLots, err);
+      const nextLots = nextLotsAfterMarginError(lastAttemptLots, err);
       if (nextLots > 0 && !isPastNineFifteenMarginRetryWindow()) {
         maxLotsCap = nextLots;
         pushLog(
@@ -3019,29 +2990,10 @@ async function tryEnter(accessToken: string, dateIst: string) {
       const resolved = await resolveEntryOption(accessToken, nextLeg, attempt, dateIst);
       if (!resolved) throw new Error("ATM option not found");
 
-      const {
-        ltp: optionLtp,
-        entryLimitPrice,
-        firstLtp,
-        secondLtp,
-        spikePct,
-        staleFirstQuote,
-        source: ltpSource,
-      } = await resolveConservativeEntryLtp(accessToken, resolved, attempt);
-      const ltpSourceLabel =
-        ltpSource === "ws-91601"
-          ? "WS 9:16:01"
-          : ltpSource === "ws-consecutive"
-            ? "WS consecutive"
-            : "REST";
-      if (staleFirstQuote) {
-        pushLog(
-          `Entry LTP ${ltpSourceLabel} · 1st ₹${firstLtp.toFixed(2)} · 2nd ₹${secondLtp.toFixed(2)} · sizing on ₹${optionLtp.toFixed(2)} (${spikePct.toFixed(1)}% spike dropped) · limit BUY @ ₹${entryLimitPrice.toFixed(2)}`,
-          "info",
-        );
-      }
+      const { ltp: optionLtp, source: ltpSource } = await resolveMarketEntryLtp(accessToken, resolved);
+      const sizingLtp = optionLtp * MARKET_BUY_SIZING_CUSHION;
 
-      const sizing = await resolveEntryQuantity(accessToken, resolved.lotSize, optionLtp, {
+      const sizing = await resolveEntryQuantity(accessToken, resolved.lotSize, sizingLtp, {
         maxLots: maxLotsCap,
       });
       if (sizing.lots <= 0 || sizing.quantity <= 0) {
@@ -3056,13 +3008,14 @@ async function tryEnter(accessToken: string, dateIst: string) {
       const splitLabel = formatLotSplitLabel(lotChunks);
 
       pushLog(
-        `Entry attempt ${attempt} · ${legLabel(nextLeg)} ${resolved.tradingsymbol} · limit BUY @ ₹${entryLimitPrice.toFixed(2)} (${ltpSourceLabel}: 1st ₹${firstLtp.toFixed(2)} · 2nd ₹${secondLtp.toFixed(2)}, size on ₹${optionLtp.toFixed(2)}) · ${modeLabel} · ${splitLabel} · ₹${Math.floor(sizing.availableBalance)} avail`,
+        `Entry attempt ${attempt} · ${legLabel(nextLeg)} ${resolved.tradingsymbol} · market BUY (${ltpSource} LTP ₹${optionLtp.toFixed(2)}, sized at ₹${sizingLtp.toFixed(2)} incl. ${Math.round((MARKET_BUY_SIZING_CUSHION - 1) * 100)}% margin cushion) · ${modeLabel} · ${splitLabel} · ₹${Math.floor(sizing.availableBalance)} avail`,
         attempt === 1 ? "success" : "info",
       );
 
       // Never double-buy *our own* leg after a partially-completed attempt. A leg opened by
       // momentum scalper is not a duplicate of ours, so it must not short-circuit this entry.
-      const existingBeforeOrders = await findOpenNiftyMisOption(accessToken);
+      // Until this entry has claimed a contract there is nothing of ours to find, so skip the read.
+      const existingBeforeOrders = ownedSymbol ? await findOpenNiftyMisOption(accessToken) : null;
       if (
         existingBeforeOrders &&
         existingBeforeOrders.quantity > 0 &&
@@ -3086,38 +3039,16 @@ async function tryEnter(accessToken: string, dateIst: string) {
       const orderQuantities = lotChunks.map((lots) => lots * resolved.lotSize);
       // Claim the contract before the first BUY leaves, so a crash mid-entry still recovers.
       ownedSymbol = resolved.tradingsymbol;
-      let placed = await placeSplitLimitOrders(accessToken, {
+      const placed = await placeSplitMarketOrders(accessToken, {
         tradingsymbol: resolved.tradingsymbol,
         transaction_type: "BUY",
         quantities: orderQuantities,
-        price: entryLimitPrice,
       });
       for (const failure of placed.failures) {
-        pushLog(`Entry limit rejected at placement · ${failure.message}`, "warning");
+        pushLog(`Entry market BUY rejected at placement · ${failure.message}`, "warning");
       }
 
-      let { fills, failures: fillFailures } = await awaitOrderFills(
-        accessToken,
-        placed.orderIds,
-        ENTRY_LIMIT_FILL_TIMEOUT_MS,
-      );
-
-      if (fills.length === 0 && placed.orderIds.length > 0) {
-        await cancelOpenOrders(accessToken, placed.orderIds);
-        pushLog(
-          `Entry limit @ ₹${entryLimitPrice.toFixed(2)} did not fill in ${ENTRY_LIMIT_FILL_TIMEOUT_MS / 1000}s · market backup`,
-          "warning",
-        );
-        placed = await placeSplitMarketOrders(accessToken, {
-          tradingsymbol: resolved.tradingsymbol,
-          transaction_type: "BUY",
-          quantities: orderQuantities,
-        });
-        for (const failure of placed.failures) {
-          pushLog(`Entry market backup rejected · ${failure.message}`, "warning");
-        }
-        ({ fills, failures: fillFailures } = await awaitOrderFills(accessToken, placed.orderIds));
-      }
+      const { fills, failures: fillFailures } = await awaitOrderFills(accessToken, placed.orderIds);
 
       if (fills.length === 0) {
         const firstErr = fillFailures[0] ?? placed.failures[0];
@@ -3145,9 +3076,17 @@ async function tryEnter(accessToken: string, dateIst: string) {
       clearFailedEntryAttempt();
       lastFailure = err instanceof Error ? err.message : "Entry failed";
 
-      if (isMarginRelatedOrderError(lastFailure) && lastAttemptLots > 0) {
-        maxLotsCap = lastAttemptLots - 1;
-      } else if (/REJECTED/i.test(lastFailure) && lastAttemptLots > 1) {
+      // Insufficient funds: step the size down and go again at once — no pause, no fresh quote.
+      const nextLots = nextLotsAfterMarginError(lastAttemptLots, err);
+      if (nextLots > 0 && !isPast916EntryWindow()) {
+        pushLog(
+          `Entry margin short at ${lastAttemptLots} lot(s) — retrying instantly at ${nextLots}`,
+          "warning",
+        );
+        maxLotsCap = nextLots;
+        continue;
+      }
+      if (/REJECTED/i.test(lastFailure) && lastAttemptLots > 1) {
         maxLotsCap = lastAttemptLots - 1;
       }
 
@@ -3273,7 +3212,6 @@ async function maybeHardStopExit(accessToken: string): Promise<boolean> {
 
   const stopSpot = computeHardStopSpot(entrySpot, leg);
   const tag = legTradeTag();
-  await cancelLegTakeProfitOrders(accessToken);
   await squareOff(
     accessToken,
     `${tag} hard stop at ${getHardStopStartLabel()} · Nifty ${lastSpot.toFixed(2)} is ` +
@@ -3290,13 +3228,24 @@ async function maybeHybrid916IndexExit(accessToken: string): Promise<boolean> {
   if (!shouldExitNineSixteen(lastSpot, entrySpot, leg, indexExitTargetPoints)) return false;
 
   const sign = leg === "CE_BUY" ? "+" : "−";
-  await cancelLegTakeProfitOrders(accessToken);
   await squareOff(
     accessToken,
     `9:16 index exit · Nifty ${lastSpot.toFixed(2)} hit ${indexExitSchedule ?? `flat ${sign}${indexExitTargetPoints}`} ` +
       `(target ${indexExitTargetSpot.toFixed(2)} from entry ${entrySpot.toFixed(2)}) · market sell`,
   );
   return true;
+}
+
+/**
+ * Nifty-only exits (9:16 index target and the 10:00 hard stop) read nothing but websocket state, so
+ * they run before any Kite REST call. A stalled order or position read must never hold them up.
+ * squareOff cancels the resting take-profit limit itself before selling.
+ */
+async function maybeNiftyDrivenExit(accessToken: string, dateIst: string): Promise<boolean> {
+  if (phase !== "in_position" || squareOffInFlight) return false;
+  maybeRetargetHybrid916Minute(dateIst);
+  if (await maybeHybrid916IndexExit(accessToken)) return true;
+  return maybeHardStopExit(accessToken);
 }
 
 async function checkAndMaybeExitTakeProfitLeg(accessToken: string, dateIst: string): Promise<boolean> {
@@ -3323,6 +3272,10 @@ async function checkAndMaybeExitTakeProfitLeg(accessToken: string, dateIst: stri
     return true;
   }
 
+  loopStep = "Nifty index exit / hard stop";
+  if (await maybeNiftyDrivenExit(accessToken, dateIst)) return true;
+
+  loopStep = "take-profit order sync (Kite /orders)";
   await syncLegTakeProfitOrders(accessToken, dateIst);
 
   if (
@@ -3330,11 +3283,13 @@ async function checkAndMaybeExitTakeProfitLeg(accessToken: string, dateIst: stri
     nineFifteenTpOrderIds.length === 0 &&
     nineFifteenTpFilledQty <= 0
   ) {
+    loopStep = "take-profit order placement";
     await placeLegTakeProfitOrders(accessToken, dateIst);
   }
 
   if (tradingsymbol && quantity > 0) {
     try {
+      loopStep = "position check (Kite /portfolio/positions)";
       const brokerQty = await fetchNetQty(accessToken, tradingsymbol, activeKiteProduct());
       if (brokerQty <= 0) {
         await completeLegTakeProfitExit(accessToken, dateIst, "limit");
@@ -3352,14 +3307,7 @@ async function checkAndMaybeExitTakeProfitLeg(accessToken: string, dateIst: stri
     }
   }
 
-  if (tradeSlot === "nine-sixteen" && phase === "in_position") {
-    maybeRetargetHybrid916Minute(dateIst);
-  }
-
-  if (await maybeHybrid916IndexExit(accessToken)) return true;
-
-  if (await maybeHardStopExit(accessToken)) return true;
-
+  loopStep = "take-profit market backup";
   const legPnl = ownLegUnrealisedPnl(entryPrice, quantity, lastOptionPrice);
   const tpPct = activeLegTakeProfitPct(dateIst);
   if (shouldExitNineFifteenTakeProfit(legPnl, entryPrice, quantity, tpPct)) {
@@ -3401,12 +3349,53 @@ async function evaluateLiveExits() {
   if (phase !== "in_position" || squareOffInFlight) return;
   const session = loadKiteSession();
   if (!session?.accessToken) return;
-  await checkAndMaybeExit(session.accessToken, getIndianMarketContext().dateIST);
+  const dateIst = getIndianMarketContext().dateIST;
+  if (await maybeNiftyDrivenExit(session.accessToken, dateIst)) return;
+  // Several ticks a second would otherwise stack dozens of concurrent Kite reads.
+  if (liveExitCheckInFlight) return;
+  liveExitCheckInFlight = true;
+  try {
+    await checkAndMaybeExit(session.accessToken, dateIst);
+  } finally {
+    liveExitCheckInFlight = false;
+  }
+}
+
+/**
+ * Runs every second, independent of the main loop and the tick stream: re-checks the Nifty-driven
+ * exits, and warns with the step it is stuck on if a loop pass has been busy too long.
+ */
+function startExitHeartbeat() {
+  if (exitHeartbeatTimer) return;
+  exitHeartbeatTimer = setInterval(() => {
+    if (loopBusy && loopStartedAt > 0) {
+      const stalledMs = Date.now() - loopStartedAt;
+      if (stalledMs >= LOOP_STALL_WARN_MS && Date.now() - loopStallWarnedAt >= LOOP_STALL_WARN_MS) {
+        loopStallWarnedAt = Date.now();
+        pushLog(
+          `Bot loop stalled ${Math.round(stalledMs / 1000)}s at "${loopStep || "unknown"}" · Nifty index exit and hard stop still checked every second`,
+          "warning",
+        );
+      }
+    }
+    if (phase !== "in_position") return;
+    const session = loadKiteSession();
+    if (!session?.accessToken) return;
+    void maybeNiftyDrivenExit(session.accessToken, getIndianMarketContext().dateIST).catch((err) => {
+      pushLog(
+        `Heartbeat exit check failed · ${err instanceof Error ? err.message : "unknown"}`,
+        "warning",
+      );
+    });
+  }, 1000);
+  exitHeartbeatTimer.unref?.();
 }
 
 async function tickInPosition(accessToken: string, dateIst: string) {
+  loopStep = "websocket check";
   await ensureNiftyTicker(accessToken, dateIst);
   if (tradingsymbol && optionInstrumentToken <= 0) {
+    loopStep = "option token lookup";
     optionInstrumentToken = (await resolveInstrumentToken("NFO", tradingsymbol, accessToken)) ?? 0;
     if (niftyInstrumentToken > 0 && optionInstrumentToken > 0) {
       setBotTickerInstruments([niftyInstrumentToken, optionInstrumentToken]);
@@ -3416,10 +3405,12 @@ async function tickInPosition(accessToken: string, dateIst: string) {
   if (!isKiteTickerConnected()) {
     const pollMs = getNineSixteenSpotPollMs();
     if (Date.now() - lastQuoteRefreshAt >= pollMs) {
+      loopStep = "REST quote refresh";
       await refreshLiveQuotes(accessToken, dateIst);
     }
   } else if (Date.now() - lastPositionSyncAt >= 5000 && tradingsymbol && isOwnPosition(tradingsymbol)) {
     try {
+      loopStep = "position sync (Kite /portfolio/positions)";
       const pos = await fetchMisPosition(accessToken, tradingsymbol, activeKiteProduct());
       if (pos) {
         applyOwnPositionSync(pos);
@@ -3444,6 +3435,8 @@ async function tickInPosition(accessToken: string, dateIst: string) {
 async function mainLoop() {
   if (loopBusy) return;
   loopBusy = true;
+  loopStartedAt = Date.now();
+  loopStep = "main loop";
 
   try {
     const ctx = getIndianMarketContext();
@@ -3545,6 +3538,7 @@ async function mainLoop() {
       // tryEnter still calls findOpenNiftyMisOption before every order, so a stray open leg
       // is caught either way.
       if (!isInNineSixteenBurst()) {
+        loopStep = "reconcile (Kite /portfolio/positions)";
         await reconcilePositionWithKite(session.accessToken, ctx.dateIST);
       }
     } catch (err) {
@@ -3733,6 +3727,8 @@ async function runEntryBurst() {
 
   entryBurstInFlight = true;
   loopBusy = true;
+  loopStartedAt = Date.now();
+  loopStep = "9:16:01 entry burst";
   if (timer) {
     clearTimeout(timer);
     timer = null;
@@ -3787,6 +3783,8 @@ async function runNineFifteenEntryBurst() {
 
   nineFifteenBurstInFlight = true;
   loopBusy = true;
+  loopStartedAt = Date.now();
+  loopStep = "9:15:11 entry burst";
   if (timer) {
     clearTimeout(timer);
     timer = null;
@@ -4115,6 +4113,7 @@ export function startNineSixteenLiveMonitor() {
 export function startNineSixteenMonitorLoop() {
   if (monitorLoopStarted) return;
   monitorLoopStarted = true;
+  startExitHeartbeat();
   if (phase === "off") {
     phase = "waiting";
     message = enabled

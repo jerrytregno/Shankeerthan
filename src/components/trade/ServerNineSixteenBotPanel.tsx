@@ -352,13 +352,13 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
           </div>
           <div className="pat-metric">
             <span className="pat-metric-label">Entry order</span>
-            <span className="pat-metric-value">9:15 market · 9:16 limit</span>
+            <span className="pat-metric-value">9:15 market · 9:16 market</span>
             <span className="pat-metric-hint">
-              <strong>9:15:11</strong> — <strong>NRML market BUY</strong> (REST LTP sizing, fast fill).{" "}
-              <strong>9:16:01</strong> — websocket CE + PE from <strong>9:15:58</strong>;{" "}
-              <strong>NRML limit BUY</strong> at the 2nd option tick in that second (size on the lower of 1st + 2nd;
-              ≥3% spike logged; market backup in 8s). Take-profit exits are <strong>LIMIT sells</strong> rounded to
-              nearest <strong>₹0.05</strong>.
+              <strong>9:15:11</strong> — <strong>NRML market BUY</strong> (REST LTP sizing + 3% margin cushion, fast
+              fill).{" "}
+              <strong>9:16:01</strong> — <strong>NRML market BUY</strong> sized on the latest option websocket price
+              (CE + PE subscribed from <strong>9:15:58</strong>) plus a 3% margin cushion. Take-profit exits are{" "}
+              <strong>LIMIT sells</strong> rounded to nearest <strong>₹0.05</strong>.
             </span>
           </div>
           <div className="pat-metric">
@@ -877,9 +877,8 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
         <br />
         <br />
         <strong>9:16 trade</strong> (armed on server): 9:15 WS close − open = Δ · flat or |Δ| &lt; 15 → skip ·{" "}
-        <strong>|Δ| ≥ 15</strong> → red buys ATM PE, green buys ATM CE · <strong>NRML limit BUY</strong> at the 2nd
-        option WS tick @{" "}
-        <strong>9:16:01</strong> (CE + PE WS from 9:15:58 · size on lower tick · market backup in 8s · retries until{" "}
+        <strong>|Δ| ≥ 15</strong> → red buys ATM PE, green buys ATM CE · <strong>NRML market BUY</strong> @{" "}
+        <strong>9:16:01</strong> (CE + PE WS from 9:15:58 · sized on latest WS price + 3% cushion · retries until{" "}
         <strong>9:16:30</strong>). Skipped if the 9:15 leg is still open at 9:16:00. Exit: limit sell{" "}
         PE <strong>+5% Mon/Wed/Thu</strong> · <strong>+7% Tue/Fri</strong> · CE <strong>+3% every day</strong> on
         capital deployed; market backup;{" "}

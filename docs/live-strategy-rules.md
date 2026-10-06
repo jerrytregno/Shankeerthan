@@ -16,7 +16,7 @@ The server runs two independent morning trades on the same bot:
 | When it buys | 9:15:11 | 9:16:01 |
 | Red signal | Drop of 5 points or more → buy ATM PE | Drop of 15 points or more → buy ATM PE |
 | Green signal | Rise of 10 points or more → buy ATM CE | Rise of 15 points or more → buy ATM CE |
-| Order type | Market buy | Limit buy (market backup after 8 seconds) |
+| Order type | Market buy | Market buy |
 | Main exit | Take-profit limit sell | Take-profit limit sell plus a Nifty index exit |
 
 A day can have no trade, only the 9:15 trade, only the 9:16 trade, or both, one after the other. The two can never be open together. If the 9:15 trade is still open at 9:16:00, the 9:16 trade is skipped for the day (with one exception, see 1.10).
@@ -83,12 +83,12 @@ Note that green needs a bigger move (10 points) than red (5 points).
 ### 1.4 Step 4: sizing (how many lots)
 
 1. The bot reads the option's last traded price (LTP) twice over REST, 1 second apart, and sizes on the **lower** of the two prices. This protects against an opening spike in the first quote.
-2. It uses the full available balance: lots = floor(available balance ÷ (LTP × 65)).
-3. Kite allows at most 25 lots per order, so a larger size is split into parallel orders (for example 30 lots → one order of 25 and one of 5). It is still one position.
+2. It uses the full available balance, with a **3% margin cushion**: lots = floor(available balance ÷ (LTP × 1.03 × 65)). Kite blocks margin for a market buy about 3% above the last price (on 28 Sep it asked ₹1,09,473 for an order worth ₹1,06,265 at the last price), so sizing on the raw price would get the first order refused.
+3. Kite allows at most 25 lots per order, so a larger size is split into parallel orders (for example 29 lots → one order of 25 and one of 4). It is still one position.
 
 Timing note: the two price reads take about 1 second, so the order usually reaches Kite at about 9:15:12, not exactly 9:15:11.000.
 
-> Example: available balance ₹2,00,000. PE quotes are ₹101.00, then ₹100.00 one second later. The bot sizes on ₹100.00. One lot costs 100 × 65 = ₹6,500, so 2,00,000 ÷ 6,500 = 30.7 → **30 lots (1,950 qty)**, sent as 25 + 5 lots.
+> Example: available balance ₹2,00,000. PE quotes are ₹101.00, then ₹100.00 one second later. The bot sizes on ₹100.00 × 1.03 = ₹103.00. One lot counts as 103 × 65 = ₹6,695, so 2,00,000 ÷ 6,695 = 29.9 → **29 lots (1,885 qty)**, sent as 25 + 4 lots.
 
 ### 1.5 Step 5: the entry order
 
@@ -97,7 +97,7 @@ Timing note: the two price reads take about 1 second, so the order usually reach
 
 ### 1.6 What happens if Kite says "insufficient funds"
 
-The live price can move between sizing and placement, so Kite sometimes rejects for margin.
+The 3% cushion covers the usual extra margin, but the live price can still move between sizing and placement, so Kite can occasionally reject for margin.
 
 1. The bot immediately retries with fewer lots:
    - If Kite quotes "Required" and "Available" amounts, the bot scales the size down in one step: new lots = floor(current lots × available ÷ required). It always drops at least 1 lot.
@@ -105,13 +105,13 @@ The live price can move between sizing and placement, so Kite sometimes rejects 
 2. It keeps retrying instantly, with no deliberate pause, **until 9:15:15**.
 3. If it still hasn't got in by 9:15:16, the 9:15 trade is skipped for the day. The 9:16 trade is not affected.
 
-> Example: the bot tries 30 lots. Kite replies "Required: ₹1,95,800 · Available: ₹1,95,000". The scaled size is floor(30 × 1,95,000 ÷ 1,95,800) = floor(29.88) = **29 lots**, retried at once. If 29 is also rejected, it tries 28, and so on, until 9:15:15.
+> Example: the bot tries 29 lots. Kite replies "Required: ₹2,01,500 · Available: ₹2,00,000". The scaled size is floor(29 × 2,00,000 ÷ 2,01,500) = floor(28.78) = **28 lots**, retried at once. If 28 is also rejected, it tries 27, and so on, until 9:15:15.
 
 ### 1.7 Partial fill
 
-If some of the split orders fill and others are rejected (for example the 25-lot order fills but the 5-lot order is refused), the bot keeps what filled. It then tops up the missing lots, using the same downsize logic, **until 9:15:20**.
+If some of the split orders fill and others are rejected (for example the 25-lot order fills but the 4-lot order is refused), the bot keeps what filled. It then tops up the missing lots, using the same downsize logic, **until 9:15:20**.
 
-> Example: the target is 30 lots, but only the 25-lot order filled. The bot tries to buy 5 more lots. If 5 is refused for margin, it tries 4, then 3, and so on. It stops trying at 9:15:20 and manages whatever quantity it holds.
+> Example: the target is 29 lots, but only the 25-lot order filled. The bot tries to buy 4 more lots. If 4 is refused for margin, it tries 3, then 2, and so on. It stops trying at 9:15:20 and manages whatever quantity it holds.
 
 ### 1.8 Exit 1: take-profit limit sell (the main exit)
 
@@ -126,11 +126,11 @@ The moment the buy fills, the bot places a resting **limit sell** for the whole 
 
 The % is profit on capital deployed (entry price × quantity), not a Nifty move.
 
-> Example A (PE on a Monday): entry ₹100.00 × 1,950 qty = ₹1,95,000 deployed. Limit = 100 × 1.05 = **₹105.00**. If it fills, profit = 5 × 1,950 = **₹9,750** (5% of ₹1,95,000).
+> Example A (PE on a Monday): entry ₹100.00 × 1,885 qty = ₹1,88,500 deployed. Limit = 100 × 1.05 = **₹105.00**. If it fills, profit = 5 × 1,885 = **₹9,425** (5% of ₹1,88,500).
 >
-> Example B (PE on a Wednesday): same entry. Limit = 100 × 1.03 = **₹103.00**. Profit = **₹5,850** (3%).
+> Example B (PE on a Wednesday): same entry. Limit = 100 × 1.03 = **₹103.00**. Profit = **₹5,655** (3%).
 >
-> Example C (CE on any day): same entry. Limit = **₹103.00**. Profit = **₹5,850** (3%).
+> Example C (CE on any day): same entry. Limit = **₹103.00**. Profit = **₹5,655** (3%).
 >
 > Example D (rounding): entry ₹87.35 at 3% → 87.35 × 1.03 = 89.9705 → nearest ₹0.05 = **₹89.95**.
 
@@ -140,7 +140,7 @@ If Kite rejects the limit order, the bot retries straight away, up to 15 attempt
 
 The bot also watches live unrealised P&L. If P&L reaches the same target (PE weekday % or CE 3%) but the limit sell hasn't filled, the bot cancels the limit and sells at market.
 
-> Example: the limit sits at ₹105.00, the option trades at ₹105.10 for a moment, but your limit doesn't fill (queue or partial). Live P&L shows ≥ ₹9,750, so the bot cancels the limit and sells at market.
+> Example: the limit sits at ₹105.00, the option trades at ₹105.10 for a moment, but your limit doesn't fill (queue or partial). Live P&L shows ≥ ₹9,425, so the bot cancels the limit and sells at market.
 
 ### 1.10 Exit 3: small-body exit at 9:16:01
 
@@ -186,11 +186,11 @@ Apart from the exits above, there is no option-price stop-loss and no trailing l
 1. 9:15:00.2: open = 24,000.00.
 2. 9:15:04: ATM 24000 CE and PE are pre-resolved.
 3. 9:15:09.9: last tick before 9:15:10 is 23,992.40, red by 7.60, so the decision is to buy the PE.
-4. About 9:15:12: quotes are ₹101.00 and ₹100.00, so it sizes on ₹100. With a ₹2,00,000 balance that's 30 lots, sent as 25 + 5.
-5. Fills at an average of ₹100.20, 1,950 qty, so ₹1,95,390 deployed.
+4. About 9:15:12: quotes are ₹101.00 and ₹100.00, so it sizes on ₹100 × 1.03 = ₹103. With a ₹2,00,000 balance that's 29 lots, sent as 25 + 4.
+5. Fills at an average of ₹100.20, 1,885 qty, so ₹1,88,877 deployed.
 6. Take-profit limit (Monday, PE, 5%): 100.20 × 1.05 = 105.21 → **₹105.20**.
 7. 9:16:00: 9:15 close 23,985 (body 15), so no small-body exit.
-8. At 9:22 the option reaches ₹105.20, the limit fills, and profit is about (105.20 − 100.20) × 1,950 = **₹9,750**.
+8. At 9:22 the option reaches ₹105.20, the limit fills, and profit is about (105.20 − 100.20) × 1,885 = **₹9,425**.
 
 ---
 
@@ -226,30 +226,24 @@ Apart from the exits above, there is no option-price stop-loss and no trailing l
 
 At 9:15:58 the bot looks up the ATM CE and PE strikes from the live spot and subscribes both options to the websocket. That way the 9:16:01 order doesn't need any slow REST calls.
 
-### 2.3 Entry price: two websocket ticks in the 9:16:01 second
+### 2.3 Sizing at 9:16:01
 
-At exactly 9:16:01.000 (a dedicated timer) the bot takes the **1st and 2nd option ticks** that arrive in the 9:16:01 second for the chosen option:
+At exactly 9:16:01.000 (a dedicated timer) the bot sizes the order on the **latest option websocket price** it already has for the chosen option. Both options have been streaming since 9:15:58, so there's no waiting for a new tick. If that price is more than 3 seconds old, it reads one REST quote instead.
 
-- **Limit price** = the **2nd tick**, rounded to the nearest ₹0.05.
-- **Lot sizing** uses the **lower** of the two ticks.
-- If the 1st tick is **3% or more above** the 2nd, it's logged as an opening spike. The lower price is still used, so you don't oversize on a spike.
+Kite blocks margin for a market buy about 3% above the last price, so a full-balance order sized on the raw price would be refused. The bot therefore sizes as if the premium were **3% higher**.
 
-If the 9:16:01 ticks don't arrive in time, the bot falls back to the next two consecutive websocket ticks, and failing that, to REST quotes.
-
-> Example: 1st tick ₹120.40, 2nd tick ₹119.80. Limit buy at **₹119.80**, sized on ₹119.80.
->
-> Spike example: 1st ₹124.00, 2nd ₹120.00. The 1st is 3.3% above the 2nd, so it's logged as a spike. The limit is ₹120.00 and sizing uses ₹120.00.
+> Example: latest PE price ₹78.20, balance ₹1,17,010. Sizing price = 78.20 × 1.03 = ₹80.55. One lot = 80.55 × 65 = ₹5,236, so 1,17,010 ÷ 5,236 = 22.3 → **22 lots**.
 
 ### 2.4 The entry order
 
-- **NRML limit buy** at the limit price above, split into 25-lot orders if larger.
-- **Market backup after 8 seconds:** if the limit hasn't filled within 8 seconds, the bot cancels it and buys at market.
+- **NRML market buy** at 9:16:01, split into 25-lot orders if larger (up to 9 orders sent at the same moment). There's no limit price and nothing to wait for; it fills at the market price.
+- The bot checks for the fill every 0.2 seconds.
 - **Retries until 9:16:30:** if an attempt fails, the bot re-reads prices and tries again until 9:16:30. After that there is no 9:16 trade that day.
 
 ### 2.5 Partial fill and margin short
 
 - **Partial fill:** the bot keeps what filled and tops up the missing lots until 9:16:30.
-- **Insufficient margin:** it steps the size down instantly (for example 25 → 24 → 23), scaling in one jump when Kite quotes the required and available amounts.
+- **Insufficient margin:** it steps the size down and retries instantly, with no pause (for example 25 → 24 → 23), scaling in one jump when Kite quotes the required and available amounts.
 
 > Example: the bot tries 26 lots as 25 + 1. The 25-lot order fills and the 1-lot order is rejected for margin. It keeps the 25 lots and tries to top up 1 lot until 9:16:30.
 
@@ -346,12 +340,20 @@ Any 9:16 position still open at 3:25 PM is sold at market.
 
 There is no option-price stop-loss or trailing ladder. The trade closes on the first of the take-profit limit, market backup, index exit, hard stop or 3:25 PM.
 
-### 2.12 9:16 trade, full worked example (a Tuesday, PE)
+### 2.12 How an exit actually fires (both trades)
+
+- The index exit and hard stop are checked on **every Nifty websocket tick**, about 4 a second. A separate **1-second safety check** repeats them even if the rest of the bot stalls. They never wait behind a Kite request.
+- On the tick that crosses the level, the bot cancels the take-profit limit and sells the **whole position at market** in parallel orders (max 25 lots each, up to 9 at once). Fills are checked every 0.2 seconds.
+- If the take-profit limit was confirmed unfilled within the last 3 seconds and Kite accepted the cancel, the sell goes out without waiting for a holdings check. Holdings are verified straight after, and if a fill slipped in and the account ends up short, the excess is bought back at once.
+- Kite read requests (orders, positions, quotes) give up after 6 seconds per attempt and retry, so a stuck request can't freeze the bot.
+- If any bot step is busy for more than 20 seconds, the session log shows `Bot loop stalled … at "<step>"`.
+
+### 2.13 9:16 trade, full worked example (a Tuesday, PE)
 
 1. 9:15 open 24,000.00, 9:15 close (last tick before 9:16:00) 23,980.00, so Δ = −20, red, and |Δ| ≥ 15. Buy PE.
 2. 9:15:58: ATM 24000 CE and PE are resolved and subscribed.
 3. 9:16:00 first Nifty tick is 23,978.50, which is ≤ the 9:15:59 close of 23,980.00, so both candles are red and the index tier is −12.
-4. 9:16:01 option ticks: ₹65.30, then ₹64.75. Limit buy at ₹64.75, sized on ₹64.75. Fills: 25 lots = 1,625 qty.
+4. 9:16:01.000: the latest PE websocket price is ₹64.75, so it sizes on 64.75 × 1.03 and sends a market buy. Fills at an average of ₹64.75: 25 lots = 1,625 qty.
 5. Entry spot at fill is 23,976.00, so the index target is 23,964.00.
 6. Take-profit limit (Tuesday, PE, 7%): 64.75 × 1.07 → **₹69.30**.
 7. 9:16:59 last tick is 23,972.00, below 23,980, so the minute did not close green and there's no retarget.
@@ -367,7 +369,7 @@ There is no option-price stop-loss or trailing ladder. The trade closes on the f
 | Red threshold | ≥ 5 points → PE | ≥ 15 points → PE |
 | Green threshold | ≥ 10 points → CE | ≥ 15 points → CE |
 | Entry time | 9:15:11 (order ~9:15:12) | 9:16:01 |
-| Entry order | Market buy | Limit at 2nd tick, market backup after 8s |
+| Entry order | Market buy | Market buy (latest WS price + 3% sizing cushion) |
 | Margin retries until | 9:15:15 (top-ups until 9:15:20) | 9:16:30 |
 | PE take-profit | Mon/Tue 5% · Wed/Thu/Fri 3% | Mon/Wed/Thu 5% · Tue/Fri 7% |
 | CE take-profit | 3% every day | 3% every day |
