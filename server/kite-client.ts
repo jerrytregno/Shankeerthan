@@ -9,6 +9,11 @@ import { enrichKiteIpOrderError } from "./trading-ip.js";
 const KITE_BASE = "https://api.kite.trade";
 const KITE_HTTP_MAX_ATTEMPTS = 4;
 const KITE_HTTP_RETRY_BASE_MS = 400;
+/**
+ * Per-attempt cap on read calls. Undici's own defaults wait minutes for a stalled socket, and a
+ * read stuck that long freezes the live bot's exit loop behind it.
+ */
+const KITE_GET_TIMEOUT_MS = 6_000;
 
 interface KiteApiResponse<T = unknown> {
   status: string;
@@ -61,7 +66,7 @@ function formatNonJsonKiteError(status: number, body: string, contentType: strin
 }
 
 function isTransientKiteTransportError(message: string): boolean {
-  return /HTML instead of JSON|non-JSON|empty body|Unexpected token|is not valid JSON|ECONNRESET|ETIMEDOUT|fetch failed|network|502|503|504|429/i.test(
+  return /HTML instead of JSON|non-JSON|empty body|Unexpected token|is not valid JSON|ECONNRESET|ETIMEDOUT|fetch failed|network|aborted due to timeout|502|503|504|429/i.test(
     message,
   );
 }
@@ -99,6 +104,7 @@ export async function kiteGet<T>(path: string, accessToken: string): Promise<T> 
           "X-Kite-Version": "3",
           Authorization: `token ${getApiKey()}:${accessToken}`,
         },
+        signal: AbortSignal.timeout(KITE_GET_TIMEOUT_MS),
       });
       const json = await readKiteJsonBody(res);
       try {
@@ -454,7 +460,7 @@ export async function waitForOrderComplete(
       }
       return order;
     }
-    await new Promise((resolve) => setTimeout(resolve, 750));
+    await new Promise((resolve) => setTimeout(resolve, 200));
   }
   throw new Error(`Order ${orderId} fill timeout`);
 }
