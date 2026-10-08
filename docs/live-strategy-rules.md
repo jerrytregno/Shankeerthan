@@ -323,14 +323,16 @@ Edge cases:
 - If no Nifty tick arrives in the 9:16:00 second, the bot uses the entry spot as the 9:16 open.
 - If no Nifty tick arrives in the 9:15:59 second, the index exit isn't armed for that day. The trade then relies on the take-profit, market backup, hard stop and 3:25 PM exits. This is rare, because Nifty normally ticks several times a second.
 
-### 2.9 Exit 4: hard stop (from 10:00 AM)
+### 2.9 Exit 4: adverse checkpoint + entry return (not the 10:00 hard stop)
 
-This is the same as the 9:15 trade:
+On the **first Nifty websocket tick** at or after the checkpoint second:
 
-- **PE:** exit at market when Nifty ≥ entry spot + 30
-- **CE:** exit at market when Nifty ≤ entry spot − 30
+- **PE:** exit at market if Nifty ≥ entry spot **+ 40** (checkpoint **9:26:00 IST**)
+- **CE:** exit at market if Nifty ≤ entry spot **− 40** (checkpoint **9:17:00 IST**)
 
-It's only active from 10:00 AM and runs alongside the other exits; the first to trigger wins.
+If the 40-point stop does **not** fire at that tick, the bot arms **entry return**: exit at market the instant Nifty touches the entry spot again (PE: spot ≤ entry · CE: spot ≥ entry) on any later websocket tick.
+
+Runs alongside the take-profit limit and parallel index exit; the first to trigger wins. The 9:15 leg still uses the **10:00 AM ±30** hard stop; the 9:16 leg does not.
 
 ### 2.10 Exit 5: 3:25 PM square-off
 
@@ -338,11 +340,11 @@ Any 9:16 position still open at 3:25 PM is sold at market.
 
 ### 2.11 There is no trailing stop
 
-There is no option-price stop-loss or trailing ladder. The trade closes on the first of the take-profit limit, market backup, index exit, hard stop or 3:25 PM.
+There is no option-price stop-loss or trailing ladder. The trade closes on the first of the take-profit limit, market backup, index exit, adverse checkpoint / entry return, or 3:25 PM.
 
 ### 2.12 How an exit actually fires (both trades)
 
-- The index exit and hard stop are checked on **every Nifty websocket tick**, about 4 a second. A separate **1-second safety check** repeats them even if the rest of the bot stalls. They never wait behind a Kite request.
+- Parallel index exit, adverse checkpoint, and entry return are checked on **every Nifty websocket tick**, about 4 a second. A separate **1-second safety check** repeats them even if the rest of the bot stalls. They never wait behind a Kite request.
 - On the tick that crosses the level, the bot cancels the take-profit limit and sells the **whole position at market** in parallel orders (max 25 lots each, up to 9 at once). Fills are checked every 0.2 seconds.
 - If the take-profit limit was confirmed unfilled within the last 3 seconds and Kite accepted the cancel, the sell goes out without waiting for a holdings check. Holdings are verified straight after, and if a fill slipped in and the account ends up short, the excess is bought back at once.
 - Kite read requests (orders, positions, quotes) give up after 6 seconds per attempt and retry, so a stuck request can't freeze the bot.
@@ -376,5 +378,5 @@ There is no option-price stop-loss or trailing ladder. The trade closes on the f
 | Market backup | Yes, same % | Yes, same % |
 | Index exit | No | Yes: ∓12 / ∓8, then ∓6 from 9:17 |
 | Small-body exit | Yes, at 9:16:01 if 9:15 body < 5 | No |
-| Hard stop | From 10:00, 30 points against | From 10:00, 30 points against |
+| Hard stop / adverse | From 10:00, 30 points against | PE @ 9:26 · CE @ 9:17: 40 pts adverse, else entry return |
 | Force exit | 3:25 PM | 3:25 PM |

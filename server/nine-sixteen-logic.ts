@@ -48,11 +48,16 @@ export const NINE_SIXTEEN_TUESDAY_PNL_MORNING_TARGET_PCT = 5;
 export const NINE_SIXTEEN_TUESDAY_PNL_LATER_TARGET_PCT = 1;
 export const NINE_SIXTEEN_TUESDAY_PNL_SWITCH_MINUTE = 10 * 60 + 1;
 /**
- * From 10:00 AM IST on every day: hard exit when Nifty runs this far against the trade
- * direction, measured from the entry spot. Applies to both the 9:15 and 9:16 legs.
+ * From 10:00 AM IST: hard exit when Nifty runs this far against the entry spot (9:15 leg only).
+ * The 9:16 leg uses the hybrid checkpoint stop below instead.
  */
 export const NINE_SIXTEEN_HARD_STOP_INDEX_POINTS = 30;
 export const NINE_SIXTEEN_HARD_STOP_START_MINUTE = 10 * 60;
+/** 9:16 PE — one-shot adverse check on the first WS tick at or after this second. */
+export const NINE_SIXTEEN_HYBRID_PE_ADVERSE_CHECK_SEC = 9 * 3600 + 26 * 60;
+/** 9:16 CE — one-shot adverse check on the first WS tick at or after this second. */
+export const NINE_SIXTEEN_HYBRID_CE_ADVERSE_CHECK_SEC = 9 * 3600 + 17 * 60;
+export const NINE_SIXTEEN_HYBRID_ADVERSE_STOP_PTS = 40;
 /** From 3:00 PM IST — exit if Nifty is within this many index points of the ±target level (unused in live bot). */
 export const NINE_SIXTEEN_NEAR_TARGET_EXIT_START_MINUTE = 15 * 60;
 export const NINE_SIXTEEN_NEAR_TARGET_MAX_DISTANCE = 50;
@@ -60,7 +65,7 @@ export const NINE_SIXTEEN_NEAR_TARGET_MAX_DISTANCE = 50;
 /**
  * Live entry timing (IST):
  * 9:00:00–16:00:00 keep Kite WS up · first Nifty tick in 9:15:00–9:15:15 = open
- * last tick before 9:16:00 = close (9:15:59) · enter at 9:16:01 (1st + 2nd option WS tick).
+ * last tick before 9:16:00 = close (9:15:59) · enter on the first websocket tick in 9:16:00.
  */
 export const NINE_SIXTEEN_WS_CONNECT_SEC = 9 * 3600;
 /** Drop Kite websocket after 16:00 IST (market already closed). */
@@ -70,6 +75,11 @@ export const NINE_SIXTEEN_OPEN_TICK_END_SEC = 9 * 3600 + 15 * 60 + 15;
 export const NINE_SIXTEEN_CLOSE_SEAL_SEC = 9 * 3600 + 16 * 60;
 /** Last WS tick in the 9:15:59 second — parallel index exit close reference. */
 export const NINE_FIFTEEN_WS_CLOSE_59_SEC = 9 * 3600 + 15 * 60 + 59;
+/**
+ * From 9:15:57 — if the 9:15 leg is not in profit and Nifty has moved ≥15 pts against it vs the
+ * 9:15 open, exit at market so the 9:16 trade can run on the sealed 9:15 candle.
+ */
+export const NINE_FIFTEEN_FLIP_916_EXIT_SEC = 9 * 3600 + 15 * 60 + 57;
 /** First Nifty WS tick in the 9:16:00 second — parallel index exit open reference. */
 export const NINE_SIXTEEN_WS_OPEN_00_SEC = NINE_SIXTEEN_CLOSE_SEAL_SEC;
 /** Last WS tick in the 9:16:59 second — 9:16 minute close for green retarget. */
@@ -82,10 +92,10 @@ export const NINE_SIXTEEN_OPEN_CAPTURE_SEC = NINE_SIXTEEN_OPEN_TICK_START_SEC;
 export const NINE_SIXTEEN_OHLC_CAPTURE_SEC = NINE_SIXTEEN_CLOSE_SEAL_SEC;
 /** @deprecated use NINE_SIXTEEN_CLOSE_SEAL_SEC */
 export const NINE_SIXTEEN_CLOSE_CAPTURE_SEC = NINE_SIXTEEN_CLOSE_SEAL_SEC;
-/** Place CE/PE one second after the 9:15 close seals (close already captured at 9:16:00). */
-export const NINE_SIXTEEN_ENTRY_SEC = 9 * 3600 + 16 * 60 + 1;
-/** Backtest still prices at the Kite 9:16:00 bar open. */
-export const NINE_SIXTEEN_BACKTEST_ENTRY_SEC = 9 * 3600 + 16 * 60;
+/** Live order entry — first websocket tick in the 9:16:00 second (same instant as the Kite bar open). */
+export const NINE_SIXTEEN_ENTRY_SEC = 9 * 3600 + 16 * 60;
+/** Alias for docs/tests — backtest and live entry anchor. */
+export const NINE_SIXTEEN_BACKTEST_ENTRY_SEC = NINE_SIXTEEN_ENTRY_SEC;
 /** @deprecated no buffer after entry instant */
 export const NINE_SIXTEEN_ENTRY_BUFFER_SEC = 0;
 /** Entry order window ends at 9:16:30 IST (seconds of day). */
@@ -107,6 +117,36 @@ export const NINE_FIFTEEN_MIN_DROP_PTS = 5;
 export const NINE_FIFTEEN_MIN_RISE_PTS = 10;
 
 /** True when the websocket 9:15 open/close body is strictly below the minimum move band. */
+export function isNineFifteenFlip916ExitWindow(nowMs = Date.now()): boolean {
+  const sec = istSecondsOfDay(new Date(nowMs));
+  return sec >= NINE_FIFTEEN_FLIP_916_EXIT_SEC && sec < NINE_SIXTEEN_CLOSE_SEAL_SEC;
+}
+
+/** Nifty ≥15 pts against the 9:15 leg vs the 9:15 open (same band as the 9:16 entry candle). */
+export function isNiftyMovedOppositeFor916Flip(
+  leg: TradeLeg,
+  open915: number,
+  spot: number,
+  minPts = NINE_SIXTEEN_MIN_915_ABS_DIFF,
+): boolean {
+  if (!(open915 > 0) || !(spot > 0)) return false;
+  if (leg === "PE_BUY") return spot + 1e-9 >= open915 + minPts;
+  if (leg === "CE_BUY") return spot - 1e-9 <= open915 - minPts;
+  return false;
+}
+
+/** Early 9:15 exit to free the 9:16 slot — not in profit and Nifty flipped ≥15 vs open. */
+export function shouldNineFifteenFlip916Exit(
+  leg: TradeLeg | null,
+  open915: number,
+  spot: number,
+  legUnrealisedPnl: number | null,
+): boolean {
+  if (leg !== "PE_BUY" && leg !== "CE_BUY") return false;
+  if (legUnrealisedPnl != null && legUnrealisedPnl > 0) return false;
+  return isNiftyMovedOppositeFor916Flip(leg, open915, spot);
+}
+
 export function is915BodyBelowMinPts(
   open: number,
   close: number,
@@ -126,6 +166,10 @@ export const NINE_FIFTEEN_ENTRY_SEC = 9 * 3600 + 15 * 60 + 11;
 export const NINE_FIFTEEN_ENTRY_WINDOW_END_SEC = 9 * 3600 + 15 * 60 + 20;
 /** Last second for instant margin downsize retries on the 9:15:11 entry (skip leg if not in by 9:15:16). */
 export const NINE_FIFTEEN_MARGIN_RETRY_END_SEC = 9 * 3600 + 15 * 60 + 15;
+/** If the 9:15 leg is still open, retarget the resting take-profit limit from 3% → 2% at this instant. */
+export const NINE_FIFTEEN_TP_RETARGET_SEC = 9 * 3600 + 15 * 60 + 40;
+/** Take-profit limit % after the 9:15:40 retarget (9:15 leg only). */
+export const NINE_FIFTEEN_TAKE_PROFIT_PCT_AT_91540 = 2;
 /** @deprecated use NINE_SIXTEEN_ENTRY_WINDOW_END_SEC */
 export const NINE_SIXTEEN_ENTRY_WINDOW_END_MINUTE = Math.floor(NINE_SIXTEEN_ENTRY_WINDOW_END_SEC / 60);
 /** Kite allows 1 /quote request per second — never poll faster than that. */
@@ -178,14 +222,38 @@ export function istMsOfDay(nowMs = Date.now()): number {
   return istSecondsOfDay(new Date(nowMs)) * 1000 + (nowMs % 1000);
 }
 
-/** Signed ms until the live entry instant (9:16:01.000 IST) — negative once it has passed. */
+/** Signed ms until the live entry second (9:16:00.000 IST) — negative once it has passed. */
 export function msUntilEntryInstant(nowMs = Date.now()): number {
   return NINE_SIXTEEN_ENTRY_SEC * 1000 - istMsOfDay(nowMs);
+}
+
+/**
+ * Live 9:16 entry waits for the first WS tick in 9:16:00; if none arrives, the poll/timer may
+ * enter from 9:16:01 onward using the sealed 9:15:59 close.
+ */
+export function canAttempt916Entry(
+  seen91600WsTick: boolean,
+  nowMs = Date.now(),
+): boolean {
+  if (!isReadyFor916Entry(nowMs)) return false;
+  if (seen91600WsTick) return true;
+  return istSecondsOfDay(new Date(nowMs)) > NINE_SIXTEEN_ENTRY_SEC;
 }
 
 /** Ms until the 9:15:11 order instant — negative once it has passed. */
 export function msUntilNineFifteenEntry(nowMs = Date.now()): number {
   return NINE_FIFTEEN_ENTRY_SEC * 1000 - istMsOfDay(nowMs);
+}
+
+/** Ms until the 9:15:40 take-profit retarget — negative once it has passed. */
+export function msUntilNineFifteenTpRetarget(nowMs = Date.now()): number {
+  return NINE_FIFTEEN_TP_RETARGET_SEC * 1000 - istMsOfDay(nowMs);
+}
+
+/** True between 9:15:40.000 and 9:16:00.000 IST — catch-up window after a restart. */
+export function isInNineFifteenTpRetargetCatchUpWindow(nowMs = Date.now()): boolean {
+  const ms = istMsOfDay(nowMs);
+  return ms >= NINE_FIFTEEN_TP_RETARGET_SEC * 1000 && ms < NINE_SIXTEEN_ENTRY_SEC * 1000;
 }
 
 function nineSixteenEntryWindowEndSec(): number {
@@ -255,10 +323,11 @@ export function msUntilNextEntryPhase(
     return Math.min(5_000, Math.max(250, (NINE_SIXTEEN_OPEN_TICK_START_SEC - nowSec) * 1000));
   }
   if (nowSec < NINE_SIXTEEN_CLOSE_SEAL_SEC) {
-    // Last second before 9:16:00 — wake often so entry fires immediately.
+    // Last second before 9:16:00 — wake often so the first 9:16:00 WS tick is not missed.
     if (nowSec >= NINE_SIXTEEN_CLOSE_SEAL_SEC - 1) return 50;
     return 250;
   }
+  if (nowSec === NINE_SIXTEEN_ENTRY_SEC) return 50;
   return msUntil916Entry(nowMs);
 }
 
@@ -787,6 +856,62 @@ export function getHardStopScheduleLabel(): string {
   return `${getHardStopStartLabel()}+ hard stop ${NINE_SIXTEEN_HARD_STOP_INDEX_POINTS} pts adverse (PE +${NINE_SIXTEEN_HARD_STOP_INDEX_POINTS} / CE −${NINE_SIXTEEN_HARD_STOP_INDEX_POINTS} from entry spot)`;
 }
 
+export function hybrid916AdverseCheckpointSec(leg: TradeLeg): number | null {
+  if (leg === "PE_BUY") return NINE_SIXTEEN_HYBRID_PE_ADVERSE_CHECK_SEC;
+  if (leg === "CE_BUY") return NINE_SIXTEEN_HYBRID_CE_ADVERSE_CHECK_SEC;
+  return null;
+}
+
+export function getHybrid916AdverseCheckpointLabel(leg: TradeLeg): string {
+  if (leg === "PE_BUY") return "09:26";
+  if (leg === "CE_BUY") return "09:17";
+  return "";
+}
+
+export function computeHybrid916AdverseStopSpot(entrySpot: number, leg: TradeLeg): number {
+  return leg === "CE_BUY"
+    ? entrySpot - NINE_SIXTEEN_HYBRID_ADVERSE_STOP_PTS
+    : entrySpot + NINE_SIXTEEN_HYBRID_ADVERSE_STOP_PTS;
+}
+
+/** True when Nifty is ≥40 pts against the 9:16 entry (used at the checkpoint tick). */
+export function isHybrid916AdverseStopSpot(spot: number, entrySpot: number, leg: TradeLeg): boolean {
+  if (spot <= 0 || entrySpot <= 0) return false;
+  if (leg === "PE_BUY") return spot + 1e-9 >= entrySpot + NINE_SIXTEEN_HYBRID_ADVERSE_STOP_PTS;
+  if (leg === "CE_BUY") return spot <= entrySpot - NINE_SIXTEEN_HYBRID_ADVERSE_STOP_PTS + 1e-9;
+  return false;
+}
+
+/** After the checkpoint without a 40-pt stop — exit the moment Nifty touches the 9:16 entry spot. */
+export function shouldHybrid916ReturnToEntryExit(
+  spot: number,
+  entrySpot: number,
+  leg: TradeLeg,
+): boolean {
+  if (spot <= 0 || entrySpot <= 0) return false;
+  if (leg === "PE_BUY") return spot <= entrySpot + 1e-9;
+  if (leg === "CE_BUY") return spot + 1e-9 >= entrySpot;
+  return false;
+}
+
+export function isPastHybrid916AdverseCheckpoint(leg: TradeLeg, nowMs = Date.now()): boolean {
+  const cp = hybrid916AdverseCheckpointSec(leg);
+  if (cp == null) return false;
+  return istSecondsOfDay(new Date(nowMs)) >= cp;
+}
+
+export function getHybrid916AdverseScheduleLabel(leg: TradeLeg): string {
+  const at = getHybrid916AdverseCheckpointLabel(leg);
+  const pts = NINE_SIXTEEN_HYBRID_ADVERSE_STOP_PTS;
+  if (leg === "PE_BUY") {
+    return `${at} WS tick · exit if Nifty ≥ entry + ${pts} · else exit at entry spot on next touch`;
+  }
+  if (leg === "CE_BUY") {
+    return `${at} WS tick · exit if Nifty ≤ entry − ${pts} · else exit at entry spot on next touch`;
+  }
+  return "";
+}
+
 function pnlExitStartMinuteOfDay(): number {
   return NINE_SIXTEEN_PNL_MORNING_EXIT_START_MINUTE;
 }
@@ -979,50 +1104,111 @@ export function shouldExitOnTrailingPnl(lockedStopPct: number, pnlPct: number | 
   return pnlPct < lockedStopPct;
 }
 
-/* ---------------------------------------------------------------------------------------------
- * 9:15 exit — PE: Mon/Tue 5% · Wed/Thu/Fri 3% · CE: 3% every day · 3:25 PM square-off.
- * ------------------------------------------------------------------------------------------- */
+/**
+ * 9:15 trailing P&L ladder on option LTP websocket ticks — ratchet at each target; exit only on stop floor.
+ * After +50% (lock +30%), extends +10% target / +10% lock per tier (60/40, 70/50, … then +10 forever).
+ */
+export const NINE_FIFTEEN_PNL_TRAIL_RUNGS = [
+  { targetPct: 3, lockPct: 2 },
+  { targetPct: 4, lockPct: 3 },
+  { targetPct: 6, lockPct: 4 },
+  { targetPct: 10, lockPct: 5 },
+  { targetPct: 15, lockPct: 8 },
+  { targetPct: 20, lockPct: 12 },
+  { targetPct: 30, lockPct: 15 },
+  { targetPct: 40, lockPct: 20 },
+  { targetPct: 50, lockPct: 30 },
+  { targetPct: 60, lockPct: 40 },
+  { targetPct: 70, lockPct: 50 },
+  { targetPct: 80, lockPct: 60 },
+  { targetPct: 90, lockPct: 70 },
+  { targetPct: 100, lockPct: 80 },
+] as const;
 
-/** Take-profit on Monday (and unknown weekdays) for the 9:15 PE leg. */
-export const NINE_FIFTEEN_TAKE_PROFIT_PCT = 5;
-/** Take-profit on every weekday for the 9:15 CE leg. */
-export const NINE_FIFTEEN_CE_TAKE_PROFIT_PCT = 3;
-/** Take-profit on Wednesday. */
-export const NINE_FIFTEEN_TAKE_PROFIT_PCT_WEDNESDAY = 3;
-/** Take-profit on Thursday. */
-export const NINE_FIFTEEN_TAKE_PROFIT_PCT_THURSDAY = 3;
-/** Take-profit on Friday. */
-export const NINE_FIFTEEN_TAKE_PROFIT_PCT_FRIDAY = 3;
-/** Take-profit on Tuesday for the 9:15 PE leg. */
-export const NINE_FIFTEEN_TAKE_PROFIT_PCT_TUESDAY = 5;
-/** @deprecated Mon/Wed/Thu used to be 3% — kept so older imports do not break. */
-export const NINE_FIFTEEN_TAKE_PROFIT_PCT_EARLY = NINE_FIFTEEN_TAKE_PROFIT_PCT;
+export const NINE_FIFTEEN_PNL_TRAIL_FIRST_TARGET_PCT = NINE_FIFTEEN_PNL_TRAIL_RUNGS[0].targetPct;
 
-function nineFifteenTpSideFromLeg(leg?: string | null): "CE" | "PE" | null {
-  if (!leg) return null;
-  if (leg.startsWith("CE")) return "CE";
-  if (leg.startsWith("PE")) return "PE";
-  return null;
+export function getNineFifteenPnlTrailRungs(): readonly PnlTrailRung[] {
+  return NINE_FIFTEEN_PNL_TRAIL_RUNGS;
 }
 
-/** PE Mon/Tue 5% · Wed/Thu/Fri 3% · CE 3% every day. */
-export function getNineFifteenTakeProfitPct(dateIst?: string, leg?: string | null): number {
-  if (nineFifteenTpSideFromLeg(leg) === "CE") return NINE_FIFTEEN_CE_TAKE_PROFIT_PCT;
-  if (!dateIst) return NINE_FIFTEEN_TAKE_PROFIT_PCT;
-  const weekday = istWeekdayShortFromDateKey(dateIst);
-  if (weekday === "Tue") return NINE_FIFTEEN_TAKE_PROFIT_PCT_TUESDAY;
-  if (weekday === "Wed") return NINE_FIFTEEN_TAKE_PROFIT_PCT_WEDNESDAY;
-  if (weekday === "Thu") return NINE_FIFTEEN_TAKE_PROFIT_PCT_THURSDAY;
-  if (weekday === "Fri") return NINE_FIFTEEN_TAKE_PROFIT_PCT_FRIDAY;
+export function nextNineFifteenLockedPnlPct(lockedStopPct: number, pnlPct: number | null): number {
+  const current = Number.isFinite(lockedStopPct) && lockedStopPct > 0 ? lockedStopPct : 0;
+  if (pnlPct == null || !isPlausiblePnlPct(pnlPct)) return current;
+  let next = current;
+  for (const rung of NINE_FIFTEEN_PNL_TRAIL_RUNGS) {
+    if (pnlPct + 1e-9 >= rung.targetPct) {
+      next = Math.max(next, rung.lockPct);
+    }
+  }
+  const last = NINE_FIFTEEN_PNL_TRAIL_RUNGS[NINE_FIFTEEN_PNL_TRAIL_RUNGS.length - 1]!;
+  if (pnlPct + 1e-9 >= last.targetPct + 10) {
+    let target = last.targetPct + 10;
+    while (pnlPct + 1e-9 >= target) {
+      next = Math.max(next, target - 20);
+      target += 10;
+    }
+  }
+  return next;
+}
+
+/** Active profit target — not an exit; hitting it ratchets the ladder. */
+export function trailingNineFifteenTargetPct(lockedStopPct: number): number {
+  if (lockedStopPct <= 0) return NINE_FIFTEEN_PNL_TRAIL_FIRST_TARGET_PCT;
+  const rungs = NINE_FIFTEEN_PNL_TRAIL_RUNGS;
+  for (let i = 0; i < rungs.length; i += 1) {
+    const rung = rungs[i]!;
+    if (rung.lockPct === lockedStopPct) {
+      return i + 1 < rungs.length ? rungs[i + 1]!.targetPct : rung.targetPct + 10;
+    }
+  }
+  if (lockedStopPct >= 30) return lockedStopPct + 30;
+  return NINE_FIFTEEN_PNL_TRAIL_FIRST_TARGET_PCT;
+}
+
+export function trailingNineFifteenStopPct(lockedStopPct: number): number | null {
+  return lockedStopPct > 0 ? lockedStopPct : null;
+}
+
+/** Exit when P&L slips below the locked stop floor (never on target alone). */
+export function shouldExitNineFifteenTrailingPnl(lockedStopPct: number, pnlPct: number | null): boolean {
+  if (lockedStopPct <= 0 || pnlPct == null || !Number.isFinite(pnlPct)) return false;
+  return pnlPct < lockedStopPct;
+}
+
+export function getNineFifteenPnlTrailScheduleLabel(): string {
+  const tiers = NINE_FIFTEEN_PNL_TRAIL_RUNGS.map(
+    (rung) => `+${rung.targetPct}→lock+${rung.lockPct}%`,
+  ).join(" · ");
+  return `${tiers} · then +10% tiers · exit on stop floor only (option WS tick)`;
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * 9:15 exit — PE and CE: trailing P&L ladder on deployed capital · 3:25 PM square-off.
+ * ------------------------------------------------------------------------------------------- */
+
+/** Take-profit for every 9:15 leg (PE and CE) on every weekday. */
+export const NINE_FIFTEEN_TAKE_PROFIT_PCT = 3;
+/** @deprecated Same as {@link NINE_FIFTEEN_TAKE_PROFIT_PCT} — kept for older imports. */
+export const NINE_FIFTEEN_CE_TAKE_PROFIT_PCT = NINE_FIFTEEN_TAKE_PROFIT_PCT;
+/** @deprecated Weekday-specific PE tiers removed — all map to 3%. */
+export const NINE_FIFTEEN_TAKE_PROFIT_PCT_WEDNESDAY = NINE_FIFTEEN_TAKE_PROFIT_PCT;
+/** @deprecated Weekday-specific PE tiers removed — all map to 3%. */
+export const NINE_FIFTEEN_TAKE_PROFIT_PCT_THURSDAY = NINE_FIFTEEN_TAKE_PROFIT_PCT;
+/** @deprecated Weekday-specific PE tiers removed — all map to 3%. */
+export const NINE_FIFTEEN_TAKE_PROFIT_PCT_FRIDAY = NINE_FIFTEEN_TAKE_PROFIT_PCT;
+/** @deprecated Weekday-specific PE tiers removed — all map to 3%. */
+export const NINE_FIFTEEN_TAKE_PROFIT_PCT_TUESDAY = NINE_FIFTEEN_TAKE_PROFIT_PCT;
+/** @deprecated Kept so older imports do not break. */
+export const NINE_FIFTEEN_TAKE_PROFIT_PCT_EARLY = NINE_FIFTEEN_TAKE_PROFIT_PCT;
+
+/** 3% on deployed capital for every 9:15 PE or CE leg (date/leg ignored). */
+export function getNineFifteenTakeProfitPct(_dateIst?: string, _leg?: string | null): number {
   return NINE_FIFTEEN_TAKE_PROFIT_PCT;
 }
 
 /** One-line schedule for UI copy. */
 export function describeNineFifteenTakeProfitSchedule(): string {
-  return (
-    `PE Mon/Tue ${NINE_FIFTEEN_TAKE_PROFIT_PCT}% · Wed–Fri ${NINE_FIFTEEN_TAKE_PROFIT_PCT_WEDNESDAY}% · ` +
-    `CE ${NINE_FIFTEEN_CE_TAKE_PROFIT_PCT}% all days`
-  );
+  return `PE and CE trailing P&L ladder from +${NINE_FIFTEEN_PNL_TRAIL_FIRST_TARGET_PCT}% (option LTP WS tick · exit on stop floor only)`;
 }
 
 /** Limit price for a take-profit on the entry premium (per-unit), on the Nifty option tick (₹0.05). */
@@ -1083,7 +1269,7 @@ export function nineFifteenPnlRemainingToTarget(
   return Math.max(0, target - unrealisedPnl);
 }
 
-export type NineFifteenExitVia = "limit" | "market" | "hard-stop" | "eod";
+export type NineFifteenExitVia = "limit" | "market" | "trail-stop" | "hard-stop" | "eod";
 
 /** Human-readable close line for logs and the panel after a 9:15 / 9:16 take-profit leg exits. */
 export function formatNineFifteenExitSummary(input: {
@@ -1104,11 +1290,13 @@ export function formatNineFifteenExitSummary(input: {
   const viaLabel =
     input.via === "limit"
       ? "limit sell executed on Kite"
-      : input.via === "market"
-        ? `market exit (+${tpPct}% backup)`
-        : input.via === "hard-stop"
-          ? "hard stop (market)"
-          : "end-of-day square-off (market)";
+      : input.via === "trail-stop"
+        ? `trailing stop (floor +${tpPct}% on deployed capital)`
+        : input.via === "market"
+          ? `market exit (+${tpPct}% backup)`
+          : input.via === "hard-stop"
+            ? "hard stop (market)"
+            : "end-of-day square-off (market)";
   const parts = [
     `TRADE EXITED · ${legTag} ${viaLabel}`,
     `${input.quantity} qty`,
@@ -1172,9 +1360,10 @@ export function getPnlTrailScheduleLabel(dateIst?: string): string {
 }
 
 export function getNineFifteenLadderLabel(dateIst?: string, leg?: string | null): string {
-  const tpPct = getNineFifteenTakeProfitPct(dateIst, leg);
+  void dateIst;
+  void leg;
   return (
-    `+${tpPct}% take-profit limit on capital deployed at entry · hard stop ±${NINE_SIXTEEN_HARD_STOP_INDEX_POINTS} from ${getHardStopStartLabel()} · 3:25 PM square-off`
+    `trailing P&L from +${NINE_FIFTEEN_PNL_TRAIL_FIRST_TARGET_PCT}% (option WS tick · ratchet targets · exit on stop floor) · @ 9:15:57 if not in profit and Nifty ≥${NINE_SIXTEEN_MIN_915_ABS_DIFF} pts against vs 9:15 open → market exit for 9:16 · hard stop ±${NINE_SIXTEEN_HARD_STOP_INDEX_POINTS} from ${getHardStopStartLabel()} · 3:25 PM square-off`
   );
 }
 
@@ -1199,8 +1388,12 @@ export function getNineSixteenTakeProfitPct(dateIst?: string, leg?: TradeLeg | n
 export function getNineSixteenLadderLabel(dateIst?: string, leg?: TradeLeg | null): string {
   const tpPct = getNineSixteenTakeProfitPct(dateIst, leg);
   const sign = leg === "CE_BUY" ? "+" : "−";
+  const adverse =
+    leg === "CE_BUY" || leg === "PE_BUY"
+      ? getHybrid916AdverseScheduleLabel(leg)
+      : `hard stop ±${NINE_SIXTEEN_HARD_STOP_INDEX_POINTS} from ${getHardStopStartLabel()}`;
   return (
-    `+${tpPct}% take-profit limit on capital deployed · parallel flat ${sign}${NINE_SIXTEEN_HYBRID_INDEX_TARGET_RED_CONFIRM}/${sign}${NINE_SIXTEEN_HYBRID_INDEX_TARGET_GREEN_GAP} Nifty index exit (market) · hard stop ±${NINE_SIXTEEN_HARD_STOP_INDEX_POINTS} from ${getHardStopStartLabel()} · 3:25 PM square-off`
+    `+${tpPct}% take-profit limit on capital deployed · parallel flat ${sign}${NINE_SIXTEEN_HYBRID_INDEX_TARGET_RED_CONFIRM}/${sign}${NINE_SIXTEEN_HYBRID_INDEX_TARGET_GREEN_GAP} Nifty index exit (market) · ${adverse} · 3:25 PM square-off`
   );
 }
 

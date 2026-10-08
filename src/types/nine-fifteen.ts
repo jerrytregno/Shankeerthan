@@ -159,6 +159,20 @@ export interface NineFifteenCandleRow {
   rsi916?: number | null;
   /** Kite 1-min open at 10:00:00 IST (Nifty at the 10 AM checkpoint). */
   indexOpenAt1000?: number | null;
+  /** Kite 1-min close at 15:30:00 IST (session end). */
+  indexClose1530?: number | null;
+  /** Max points Nifty ran up from the 9:16 open through the 9:26 minute (red adverse stop). */
+  peAdverseThrough926?: number | null;
+  /** Max points Nifty ran down from the 9:16 open through the 9:17 minute (green adverse stop). */
+  ceAdverseThrough917?: number | null;
+  /** Set when red 9:26 bar open is ≥40 pts against the 9:16 entry. */
+  peAdverseStopTouch?: NineFifteenAdverseStopTouch | null;
+  /** Set when green 9:17 bar open is ≥40 pts against the 9:16 entry. */
+  ceAdverseStopTouch?: NineFifteenAdverseStopTouch | null;
+  /** First time at or after 9:26 that Nifty is back at the 9:16 open (red). */
+  peReturnToEntryFrom926?: string | null;
+  /** First time at or after 9:17 that Nifty is back at the 9:16 open (green). */
+  ceReturnToEntryFrom917?: string | null;
   /**
    * Breakout backtest only: first adverse touch of the fixed stop from the 9:16 entry
    * (CE stops below entry, PE stops above). Null when the day is not a trade day.
@@ -486,6 +500,20 @@ export interface NineFifteenCePeFailureTrade {
   nrmlCarry?: NineFifteenNrmlCarryOutcome | null;
   /** At 10:00 IST: Nifty vs the session exit target (entry ± targetPoints). */
   targetGapAt1000?: NineFifteenTargetGapAtCheckpoint | null;
+  /** Set when the 9:26 red / 9:17 green 40-pt stop closed the trade. */
+  adverseStopExit?: NineFifteenAdverseStopTouch | null;
+  /** Held past the checkpoint without a 40-pt stop — closed at 15:30 (never returned to 9:16 open). */
+  sessionEndExit?: { timeIst: string; indexPrice: number } | null;
+}
+
+/** Nifty at the fixed exit minute (red 9:26 · green 9:17) when the 40-pt stop fires. */
+export interface NineFifteenAdverseStopTouch {
+  /** 09:26:00 for red, 09:17:00 for green. */
+  timeIst: string;
+  /** Nifty at the open of that exit minute. */
+  indexPrice: number;
+  /** Adverse extreme of that same minute (high for PE, low for CE). */
+  barExtreme: number;
 }
 
 /** Snapshot at a session checkpoint — how far index was from the exit target. */

@@ -9,6 +9,10 @@ import {
   shouldExitNineSixteen,
   shouldExitOnPnlTarget,
   shouldHardStopNineSixteen,
+  isHybrid916AdverseStopSpot,
+  shouldHybrid916ReturnToEntryExit,
+  isPastHybrid916AdverseCheckpoint,
+  NINE_SIXTEEN_HYBRID_ADVERSE_STOP_PTS,
   hybrid916IndexTargetPoints,
   computeHybrid916IndexExitSpot,
   is916RedConfirmFromCaptures,
@@ -99,8 +103,8 @@ for (const [name, t, pnl, want] of pnlCases) {
   );
 }
 
-// Hard stop: from 10:00 IST, ±30 adverse Nifty from entry spot (both 9:15 and 9:16 legs).
-console.log("\n--- 10:00 hard stop (±30 from entry spot) ---");
+// Hard stop: from 10:00 IST, ±30 adverse Nifty from entry spot (9:15 leg only).
+console.log("\n--- 10:00 hard stop (±30 from entry spot · 9:15 leg) ---");
 const cases: [string, number, "CE_BUY" | "PE_BUY", string, boolean][] = [
   ["CE -29 @09:59", 23971, "CE_BUY", "09:59:59", false],
   ["CE -30 @09:59", 23970, "CE_BUY", "09:59:59", false],
@@ -177,3 +181,26 @@ console.log("CE retarget when 9:16 closes red", ok(is916MinuteAgainstLeg(23_995,
 console.log("CE no retarget when 9:16 closes green", ok(!is916MinuteAgainstLeg(24_005, 24_000, "CE_BUY")));
 console.log("PE retarget when 9:16 closes green", ok(is916MinuteAgainstLeg(24_005, 24_000, "PE_BUY")));
 console.log("PE no retarget when 9:16 closes red", ok(!is916MinuteAgainstLeg(23_995, 24_000, "PE_BUY")));
+
+console.log("\n--- 9:16 hybrid adverse + entry return (9:15 leg still uses 10:00 ±30) ---");
+console.log(
+  "PE +40 @09:26",
+  ok(isHybrid916AdverseStopSpot(entrySpot + 40, entrySpot, "PE_BUY")),
+);
+console.log(
+  "PE +39 @09:26",
+  ok(!isHybrid916AdverseStopSpot(entrySpot + 39, entrySpot, "PE_BUY")),
+);
+console.log(
+  "CE −40 @09:17",
+  ok(isHybrid916AdverseStopSpot(entrySpot - 40, entrySpot, "CE_BUY")),
+);
+console.log(
+  "past PE checkpoint",
+  ok(isPastHybrid916AdverseCheckpoint("PE_BUY", wed("09:26:00"))),
+);
+console.log(
+  "PE entry return",
+  ok(shouldHybrid916ReturnToEntryExit(entrySpot, entrySpot, "PE_BUY")),
+);
+console.log("hybrid adverse pts", NINE_SIXTEEN_HYBRID_ADVERSE_STOP_PTS);

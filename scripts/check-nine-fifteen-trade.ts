@@ -1,5 +1,5 @@
 /**
- * The 9:15 trade: the ten-second read, its +5% take-profit limit exit, and the red-only gate it puts on the
+ * The 9:15 trade: the ten-second read, its +3% take-profit limit exit, and the red-only gate it puts on the
  * 9:16 trade that follows it.
  *
  * Run: npx tsx scripts/check-nine-fifteen-trade.ts
@@ -18,6 +18,16 @@ import {
   NINE_FIFTEEN_SIGNAL_READ_SEC,
   NINE_FIFTEEN_ENTRY_WINDOW_END_SEC,
   NINE_FIFTEEN_MARGIN_RETRY_END_SEC,
+  nextNineFifteenLockedPnlPct,
+  trailingNineFifteenTargetPct,
+  shouldExitNineFifteenTrailingPnl,
+  NINE_FIFTEEN_PNL_TRAIL_FIRST_TARGET_PCT,
+  getNineFifteenPnlTrailScheduleLabel,
+  NINE_FIFTEEN_FLIP_916_EXIT_SEC,
+  isNineFifteenFlip916ExitWindow,
+  shouldNineFifteenFlip916Exit,
+  isNiftyMovedOppositeFor916Flip,
+  NINE_SIXTEEN_MIN_915_ABS_DIFF,
   isPastNineFifteenMarginRetryWindow,
   isPastNineFifteenSignalRead,
   isReadyForNineFifteenEntry,
@@ -30,12 +40,12 @@ import {
   nineFifteenTakeProfitLimitPrice,
   nineFifteenTakeProfitAmount,
   nineFifteenDeployedCapital,
-  shouldExitNineFifteenTakeProfit,
   getNineFifteenLadderLabel,
   formatNineFifteenExitSummary,
   NINE_SIXTEEN_ENTRY_SEC,
   NINE_SIXTEEN_BACKTEST_ENTRY_SEC,
   isReadyFor916Entry,
+  canAttempt916Entry,
   msUntilEntryInstant,
 } from "../server/nine-sixteen-logic.js";
 import { computeAffordableLots, conservativeEntryLtpFromQuotes } from "../server/nine-sixteen-sizing.js";
@@ -109,6 +119,39 @@ check(
   true,
 );
 
+console.log("\n--- 9:15 trailing P&L ladder ---");
+check("first target is 3%", NINE_FIFTEEN_PNL_TRAIL_FIRST_TARGET_PCT, 3);
+check("no lock before 3%", nextNineFifteenLockedPnlPct(0, 2.9), 0);
+check("+3% locks +2%", nextNineFifteenLockedPnlPct(0, 3), 2);
+check("next target after +3% is +4%", trailingNineFifteenTargetPct(2), 4);
+check("+4% locks +3%", nextNineFifteenLockedPnlPct(2, 4), 3);
+check("+50% locks +30%", nextNineFifteenLockedPnlPct(20, 50), 30);
+check("next target after +50% is +60%", trailingNineFifteenTargetPct(30), 60);
+check("does not exit at target alone", shouldExitNineFifteenTrailingPnl(2, 3), false);
+check("exits below stop floor", shouldExitNineFifteenTrailingPnl(2, 1.99), true);
+check("ladder mentions trailing", getNineFifteenLadderLabel().includes("trailing"), true);
+check("schedule mentions +3→lock+2", getNineFifteenPnlTrailScheduleLabel().includes("+3→lock+2%"), true);
+
+console.log("\n--- 9:15:57 flip exit for 9:16 ---");
+check("flip window starts at 9:15:57", NINE_FIFTEEN_FLIP_916_EXIT_SEC, 9 * 3600 + 15 * 60 + 57);
+check("in flip window at 9:15:57.500", isNineFifteenFlip916ExitWindow(ist(9, 15, 57, 500)), true);
+check("not in flip window at 9:15:56", isNineFifteenFlip916ExitWindow(ist(9, 15, 56)), false);
+check("not in flip window at 9:16:00", isNineFifteenFlip916ExitWindow(ist(9, 16, 0)), false);
+check(
+  "PE flip when spot ≥ open+15",
+  isNiftyMovedOppositeFor916Flip("PE_BUY", 100, 100 + NINE_SIXTEEN_MIN_915_ABS_DIFF),
+  true,
+);
+check("PE no flip at open+14.9", isNiftyMovedOppositeFor916Flip("PE_BUY", 100, 114.9), false);
+check(
+  "CE flip when spot ≤ open−15",
+  isNiftyMovedOppositeFor916Flip("CE_BUY", 100, 100 - NINE_SIXTEEN_MIN_915_ABS_DIFF),
+  true,
+);
+check("flip when not in profit", shouldNineFifteenFlip916Exit("PE_BUY", 100, 120, -500), true);
+check("no flip when in profit", shouldNineFifteenFlip916Exit("PE_BUY", 100, 120, 1), false);
+check("no flip when move too small", shouldNineFifteenFlip916Exit("PE_BUY", 100, 110, -500), false);
+
 console.log("\n--- 9:15 small-body exit arming ---");
 check("4.9 pt body is below 5", is915BodyBelowMinPts(100, 104.9), true);
 check("exactly 5 pt body is not below 5", is915BodyBelowMinPts(100, 105), false);
@@ -116,11 +159,13 @@ check("3 pt red body is below 5", is915BodyBelowMinPts(100, 97), true);
 check("15 pt body is not below 5", is915BodyBelowMinPts(100, 115), false);
 
 console.log("\n--- 9:16 live entry timing ---");
-check("live entry at 9:16:01", NINE_SIXTEEN_ENTRY_SEC, 9 * 3600 + 16 * 60 + 1);
-check("backtest entry label at 9:16:00", NINE_SIXTEEN_BACKTEST_ENTRY_SEC, 9 * 3600 + 16 * 60);
-check("entry not open at 9:16:00", isReadyFor916Entry(ist(9, 16, 0)), false);
-check("entry opens at 9:16:01", isReadyFor916Entry(ist(9, 16, 1)), true);
-check("ms until entry at 9:16:00.500", msUntilEntryInstant(ist(9, 16, 0, 500)), 500);
+check("live entry at 9:16:00", NINE_SIXTEEN_ENTRY_SEC, 9 * 3600 + 16 * 60);
+check("backtest entry at 9:16:00", NINE_SIXTEEN_BACKTEST_ENTRY_SEC, 9 * 3600 + 16 * 60);
+check("entry opens at 9:16:00", isReadyFor916Entry(ist(9, 16, 0)), true);
+check("no attempt mid-9:16:00 without WS tick", canAttempt916Entry(false, ist(9, 16, 0, 500)), false);
+check("fallback from 9:16:01 without WS tick", canAttempt916Entry(false, ist(9, 16, 1)), true);
+check("WS tick unlocks at 9:16:00", canAttempt916Entry(true, ist(9, 16, 0, 200)), true);
+check("ms until entry at 9:15:59.500", msUntilEntryInstant(ist(9, 15, 59, 500)), 500);
 
 console.log("\n--- conservative entry LTP ---");
 check("uses lower quote for sizing", conservativeEntryLtpFromQuotes(61.9, 56.51).ltp, 56.51);
@@ -135,13 +180,13 @@ check("no spike at 2.9%", conservativeEntryLtpFromQuotes(102.9, 100).staleFirstQ
 check("no spike when second is higher", conservativeEntryLtpFromQuotes(56, 57).staleFirstQuote, false);
 
 console.log("\n--- weekday take-profit limit on capital deployed ---");
-check("default take-profit is 5%", NINE_FIFTEEN_TAKE_PROFIT_PCT, 5);
-check("Tuesday take-profit is 5%", NINE_FIFTEEN_TAKE_PROFIT_PCT_TUESDAY, 5);
-check("Monday take-profit is 5%", getNineFifteenTakeProfitPct("2026-08-31"), 5);
-check("Tuesday PE take-profit is 5%", getNineFifteenTakeProfitPct("2026-09-01", "PE_BUY"), 5);
+check("default take-profit is 3%", NINE_FIFTEEN_TAKE_PROFIT_PCT, 3);
+check("Tuesday take-profit is 3%", NINE_FIFTEEN_TAKE_PROFIT_PCT_TUESDAY, 3);
+check("Monday take-profit is 3%", getNineFifteenTakeProfitPct("2026-08-31"), 3);
+check("Tuesday PE take-profit is 3%", getNineFifteenTakeProfitPct("2026-09-01", "PE_BUY"), 3);
 check("Tuesday CE take-profit is 3%", getNineFifteenTakeProfitPct("2026-09-01", "CE_BUY"), 3);
 check("Monday CE take-profit is 3%", getNineFifteenTakeProfitPct("2026-08-31", "CE_BUY"), 3);
-check("Tuesday without leg defaults to PE 5%", getNineFifteenTakeProfitPct("2026-09-01"), 5);
+check("Tuesday without leg is 3%", getNineFifteenTakeProfitPct("2026-09-01"), 3);
 check("Wednesday PE take-profit is 3%", getNineFifteenTakeProfitPct("2026-09-02"), 3);
 check("Wednesday CE take-profit is 3%", getNineFifteenTakeProfitPct("2026-09-02", "CE_BUY"), 3);
 check("CE take-profit constant is 3%", NINE_FIFTEEN_CE_TAKE_PROFIT_PCT, 3);
@@ -160,10 +205,7 @@ check("deployed capital is entry × qty", nineFifteenDeployedCapital(100, 650), 
 check("profit aim is 5% of deployed", nineFifteenTakeProfitAmount(100, 1000, 5), 5000);
 check("profit aim is 10% of deployed", nineFifteenTakeProfitAmount(100, 1000, 10), 10_000);
 check("₹1L deployed → ₹5K profit aim", nineFifteenTakeProfitAmount(100, 1000, 5), 100_000 * 0.05);
-check("does not exit below 5% target", shouldExitNineFifteenTakeProfit(4999, 100, 1000, 5), false);
-check("exits at 5% target", shouldExitNineFifteenTakeProfit(5000, 100, 1000, 5), true);
-check("exits at 10% target", shouldExitNineFifteenTakeProfit(10_000, 100, 1000, 10), true);
-check("label mentions +5% on Tuesday PE", getNineFifteenLadderLabel("2026-09-01", "PE_BUY").includes("+5%"), true);
+check("label mentions +3% on Tuesday PE", getNineFifteenLadderLabel("2026-09-01", "PE_BUY").includes("+3%"), true);
 check("label mentions +3% on Tuesday CE", getNineFifteenLadderLabel("2026-09-01", "CE_BUY").includes("+3%"), true);
 check("label mentions +3% on Wednesday", getNineFifteenLadderLabel("2026-09-02", "CE_BUY").includes("+3%"), true);
 check("label mentions +3% on Thursday", getNineFifteenLadderLabel("2026-09-03", "CE_BUY").includes("+3%"), true);
@@ -286,7 +328,7 @@ console.log("\n--- both legs armed by default on a fresh load ---");
   check("no 9:15 leg claimed yet", status.tradeSlot, "nine-sixteen");
   check("nothing settled before the day starts", status.nineFifteenSettled, false);
   check("the 9:16 trade is not blocked", status.nineFifteenBlocked916, false);
-  check("9:15 take-profit pct is 5", status.nineFifteenTakeProfitPct, 5);
+  check("9:15 take-profit pct is 3", status.nineFifteenTakeProfitPct, 3);
   // Only an explicit boolean true may arm either leg — the toggle routes compare with ===.
   for (const value of ["true", "1", 1, {}] as unknown[]) {
     check(`payload ${JSON.stringify(value)} does not arm`, value === true, false);

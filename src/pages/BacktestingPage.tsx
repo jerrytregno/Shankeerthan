@@ -28,7 +28,11 @@ import {
 import { cn, formatNumber } from "@/lib/utils";
 import { formatWeekdayFromDateKey } from "@/lib/market-time";
 import { trade915EntrySize } from "@/lib/nine-sixteen-body-buckets";
-import { LossTradesAccordion, LateWinTradesAccordion } from "@/components/nine-fifteen/LossTradesAccordion";
+import {
+  LossTradesAccordion,
+  LateWinTradesAccordion,
+  WinTradesAccordion,
+} from "@/components/nine-fifteen/LossTradesAccordion";
 import "@/styles/nine-fifteen-page.css";
 
 const BACKTEST_WINDOWS = [
@@ -519,35 +523,12 @@ function StrategyFailuresPanel({
   });
   if (failures.length === 0) return null;
 
-  const altRescued20 = showAlt20After1010
-    ? failures.filter((t) => t.altTargetAfter1010?.wouldWin).length
-    : 0;
-  const altRescued10 = showAlt20After1010
-    ? failures.filter((t) => t.altTarget10After1010?.wouldWin).length
-    : 0;
-  const nrmlWins = failures.filter((t) => t.nrmlCarry?.wouldWin).length;
-  const nrmlWithData = failures.filter((t) => t.nrmlCarry != null).length;
-
   return (
     <details className="nf-failures-details" open>
       <summary className="nf-failures-summary">
         <span className="nf-failures-rule">{stats.label}</span>
         <span className="nf-failures-count text-muted">
-          {failures.length}{" "}
-          {maxAbsDiffExclusive != null ? "near-miss loss" : "taken loss"}
-          {failures.length === 1 ? "" : "es"}
-          {maxAbsDiffExclusive != null
-            ? ` (entry ±${targetPoints} / band exit not reached)`
-            : minAbsDiff != null && minAbsDiff < 15
-              ? " (band exit not reached)"
-              : ` (entry ±${targetPoints} not reached)`}
-          {showAlt20After1010 && (altRescued20 > 0 || altRescued10 > 0)
-            ? ` · alt: ${altRescued20} at ±20@10:01, ${altRescued10} at ±15@11:01`
-            : ""}
-          {nrmlWithData > 0
-            ? ` · NRML to next ${nrmlWins > 0 ? `${nrmlWins}/${nrmlWithData} won` : `${nrmlWithData} still loss`} (Tue 15:00)`
-            : ""}
-          {" · expand a day for 1-min chart"}
+          {failures.length} loss{failures.length === 1 ? "" : "es"}
         </span>
       </summary>
       <LossTradesAccordion
@@ -570,6 +551,7 @@ function FollowStrategyWinsPanel({
   winIntro,
   hourlyHitRuleLabel,
   minAbsDiffExclusive = false,
+  hybrid916SimpleTable = false,
 }: {
   stats: NineFifteenCePeStrategyStats;
   targetPoints: number;
@@ -580,6 +562,8 @@ function FollowStrategyWinsPanel({
   winIntro?: ReactNode;
   hourlyHitRuleLabel?: string;
   minAbsDiffExclusive?: boolean;
+  /** 9:16 hybrid — compact win table; no separate “after 10:00” box. */
+  hybrid916SimpleTable?: boolean;
 }) {
   const index = useBacktestIndex();
   const sc = (points: number) => points * index.pointScale;
@@ -620,7 +604,7 @@ function FollowStrategyWinsPanel({
           </>
         )}
       </p>
-      {showHourlyBreakdown && (
+      {showHourlyBreakdown && !hybrid916SimpleTable && (
         <WinHourlyBreakdown
           wins={wins}
           targetPoints={targetPoints}
@@ -630,21 +614,35 @@ function FollowStrategyWinsPanel({
           }
         />
       )}
-      <details className="nf-failures-details nf-wins-details" open>
-        <summary className="nf-failures-summary">
-          <span className="nf-failures-rule">{stats.label}</span>
-          <span className="nf-failures-count text-muted">
-            {wins.length} win{wins.length === 1 ? "" : "s"} · expand/collapse list
-          </span>
-        </summary>
-        <StrategyTradeDetailTable
-          trades={wins}
-          kind="win"
-          targetPoints={targetPoints}
-          statsLabel={stats.label}
-        />
-      </details>
-      <LateWinTradesAccordion trades={wins} targetPoints={targetPoints} />
+      {hybrid916SimpleTable ? (
+        <details className="nf-failures-details nf-wins-details" open>
+          <summary className="nf-failures-summary">
+            <span className="nf-failures-rule">{stats.label}</span>
+            <span className="nf-failures-count text-muted">
+              {wins.length} win{wins.length === 1 ? "" : "s"}
+            </span>
+          </summary>
+          <WinTradesAccordion trades={wins} />
+        </details>
+      ) : (
+        <>
+          <details className="nf-failures-details nf-wins-details" open>
+            <summary className="nf-failures-summary">
+              <span className="nf-failures-rule">{stats.label}</span>
+              <span className="nf-failures-count text-muted">
+                {wins.length} win{wins.length === 1 ? "" : "s"} · expand/collapse list
+              </span>
+            </summary>
+            <StrategyTradeDetailTable
+              trades={wins}
+              kind="win"
+              targetPoints={targetPoints}
+              statsLabel={stats.label}
+            />
+          </details>
+          <LateWinTradesAccordion trades={wins} targetPoints={targetPoints} />
+        </>
+      )}
     </div>
   );
 }
@@ -666,6 +664,7 @@ function ConsolidatedBacktestResults({
   lossTitle = "Loss trades",
   minAbsDiffExclusive = false,
   hourlyHitRuleLabel,
+  hybrid916SimpleTable = false,
 }: {
   consolidated: NineFifteenCePeStrategyStats;
   consolidatedFilter: NineFifteenFollowFilterStats;
@@ -682,6 +681,7 @@ function ConsolidatedBacktestResults({
   lossTitle?: string;
   minAbsDiffExclusive?: boolean;
   hourlyHitRuleLabel?: string;
+  hybrid916SimpleTable?: boolean;
 }) {
   return (
     <>
@@ -716,6 +716,7 @@ function ConsolidatedBacktestResults({
         winIntro={winIntro}
         hourlyHitRuleLabel={hourlyHitRuleLabel ?? "when the band’s index exit was first hit"}
         minAbsDiffExclusive={minAbsDiffExclusive}
+        hybrid916SimpleTable={hybrid916SimpleTable}
       />
 
       {(consolidated.failures ?? []).length > 0 && (
@@ -818,7 +819,8 @@ function Hybrid916BacktestSection({
             <strong>Both {v.colour} only</strong> — includes only days where{" "}
             <strong>9:16 open {v.confirmCmp} 9:15 close</strong> (second candle also {v.colour}). {v.Opposite}-gap
             days at 9:16 are excluded. Take profit is a flat{" "}
-            <strong>{v.sign}{sc(flatConfirm)} Nifty points</strong> from the 9:16 entry.
+            <strong>{v.sign}{sc(flatConfirm)} Nifty points</strong> from the 9:16 entry. Adverse stop:{" "}
+            <strong>{variant === "green" ? "9:17" : "9:26"} if 40 pts against</strong> and the target has not hit.
           </>
         ) : secondCandleFlatExits ? (
           <>
@@ -826,8 +828,10 @@ function Hybrid916BacktestSection({
             When <strong>9:16 open {v.confirmCmp} 9:15 close</strong> (both candles {v.colour}), take profit is a
             flat <strong>{v.sign}{sc(flatConfirm)} Nifty points</strong> from the 9:16 entry. When{" "}
             <strong>9:16 {v.gapVerb}</strong> {v.gapWhere} the 9:15 close ({v.opposite} second candle), take
-            profit is a flat <strong>{v.sign}{sc(flatGap)} Nifty points</strong> from entry. No tiered main-band
-            exits.
+            profit is a flat <strong>{v.sign}{sc(flatGap)} Nifty points</strong> from entry. Adverse stop replaces
+            the 10:00 ±30 exit: <strong>red at 9:26 if 40 pts against</strong>,{" "}
+            <strong>green at 9:17 if 40 pts against</strong>, and only when the target has not hit yet. A target
+            touch on that same minute still counts as a win.
           </>
         ) : (
           <>
@@ -904,13 +908,17 @@ function Hybrid916BacktestSection({
               bothSameOnly ? (
                 <>
                   flat {v.sign}
-                  {sc(flatConfirm)} from 9:16 entry (both candles {v.colour}).
+                  {sc(flatConfirm)} from 9:16 entry (both candles {v.colour}). If the 40-pt stop does not
+                  fire, a return to the 9:16 open or the flat target later in the session also wins.
                 </>
               ) : (
                 <>
                   flat {v.sign}
                   {sc(flatConfirm)} from 9:16 when 9:16 open {v.confirmCmp} 9:15 close, or flat {v.sign}
-                  {sc(flatGap)} when 9:16 {v.gapVerb} {v.gapWhere} the 9:15 close.
+                  {sc(flatGap)} when 9:16 {v.gapVerb} {v.gapWhere} the 9:15 close. The hit only counts if it prints
+                  before the adverse stop ({variant === "green" ? "9:17 · 40 pts against" : "9:26 · 40 pts against"}
+                  ). If the stop does not fire, a return to the 9:16 open or the same flat target later
+                  in the session also counts as a win (including after 10:00 AM).
                 </>
               )
             ) : (
@@ -923,20 +931,15 @@ function Hybrid916BacktestSection({
         }
         lossIntro={
           <>
-            {v.Colour} 9:15 with |Δ| {sizeCompare} {mainBand}
-            {bothSameOnly
-              ? ` · both ${v.colour} only · flat ${v.sign}${flatConfirm} exit`
-              : secondCandleFlatExits
-                ? ` · flat ${v.sign}${flatConfirm} or ${v.sign}${flatGap} exit`
-                : ""}
-            ; {v.side} entered at 9:16 but the index exit never hit same day. Each row shows{" "}
-            <strong>Nifty @10:00 IST</strong> vs the exit target, plus{" "}
-            <strong>NRML carry</strong> until the next {expiryDay} 15:00 IST. Expand a day for the
-            full-session <strong>1-min candle chart</strong> (9:15–15:30).
+            {variant === "green" ? "Green exits at 9:17" : "Red exits at 9:26"} when that minute&apos;s
+            open is ≥40 pts against the 9:16 entry (difference uses that open). If the stop does not
+            fire, a later return to the 9:16 open or the flat target hit counts as a win (see win table);
+            otherwise the row shows 15:30.
           </>
         }
         winHeading={`Winning trades — ${v.colour} 9:15 · ${v.side} @ 9:16`}
         lossTitle={`Loss trades — ${v.colour} 9:15 · ${v.side} @ 9:16`}
+        hybrid916SimpleTable={Boolean(secondCandleFlatExits || bothSameOnly)}
         hourlyHitRuleLabel={
           bothSameOnly
             ? `when the flat ${v.sign}${flatConfirm} exit was first hit`

@@ -15,6 +15,7 @@ import {
 } from "./kite-http.js";
 import { isIpWhitelistedForKite } from "../src/lib/kite-trading-ip.js";
 import { startKiteAutoLogin } from "./kite-auto-login.js";
+import { startMorningWsTickFirebaseArchive } from "./morning-ws-tick-firebase-archive.js";
 
 const PORT = Number(process.env.PORT) || 3001;
 
@@ -59,6 +60,8 @@ app.listen(PORT, async () => {
 
   startNineSixteenBot();
   console.log("[nine-sixteen-bot] 9:15 + 9:16 trading armed on server");
+
+  startMorningWsTickFirebaseArchive();
 
   // Main loop runs on startup so Traps can scan when armed from the UI.
   if (isTrapsBotHardDisabled()) {

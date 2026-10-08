@@ -350,6 +350,14 @@ function SessionDayAccordionItem({
         {variant === "win" && trade.targetGapAt1000 && (
           <TargetGapAt1000Summary gap={trade.targetGapAt1000} />
         )}
+        {variant === "loss" && trade.adverseStopExit && (
+          <span className="text-sm text-down">
+            Exit {trade.side === "CE" ? "09:17" : "09:26"} · Nifty{" "}
+            <span className="font-mono">{formatNumber(trade.adverseStopExit.indexPrice, 2)}</span>
+            {" "}
+            (bar {formatNumber(trade.adverseStopExit.barExtreme, 2)})
+          </span>
+        )}
         {variant === "loss" && (
           <span className="text-sm text-muted">
             Best {formatNumber(trade.maxMoveInDirection, 2)} pts
@@ -408,6 +416,15 @@ function SessionDayAccordionItem({
               · RSI(14) @9:16 {formatRsi(trade.rsi916)}
             </>
           )}
+          {trade.adverseStopExit && (
+            <>
+              {" "}
+              · Adverse exit {trade.side === "CE" ? "09:17" : "09:26"} · Nifty open{" "}
+              {formatNumber(trade.adverseStopExit.indexPrice, 2)} · bar{" "}
+              {trade.side === "CE" ? "low" : "high"}{" "}
+              {formatNumber(trade.adverseStopExit.barExtreme, 2)}
+            </>
+          )}
           {trade.exitTargetIndexPrice != null && (
             <>
               {" "}
@@ -460,6 +477,62 @@ function SessionDayAccordionItem({
   );
 }
 
+export function WinTradesAccordion({ trades }: { trades: NineFifteenCePeFailureTrade[] }) {
+  if (trades.length === 0) return null;
+
+  return (
+    <div className="table-wrap">
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Day</th>
+            <th className="text-right">9:16 open</th>
+            <th className="text-right">Nifty at exit</th>
+            <th className="text-right">Difference</th>
+            <th>Exit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {trades.map((trade) => {
+            const open916 = trade.entryAt?.indexPrice ?? null;
+            const hit = trade.targetHit;
+            const exitNifty = hit?.indexPrice ?? null;
+            const exitClock = hit?.timeIst.slice(0, 5) ?? "—";
+            const diff = open916 != null && exitNifty != null ? exitNifty - open916 : null;
+            const exitLabel =
+              hit?.levelLabel === "entry"
+                ? "Return to 9:16 open"
+                : hit
+                  ? "Flat target"
+                  : "—";
+            return (
+              <tr key={trade.date}>
+                <td className="font-mono">{trade.date}</td>
+                <td>{formatWeekdayFromDateKey(trade.date)}</td>
+                <td className="text-right font-mono">{open916 != null ? formatNumber(open916, 2) : "—"}</td>
+                <td className="text-right font-mono">
+                  {exitNifty != null ? formatNumber(exitNifty, 2) : "—"}
+                  <span className="text-muted"> {exitClock}</span>
+                </td>
+                <td
+                  className={cn(
+                    "text-right font-mono",
+                    diff != null && diff > 0 ? "text-up" : diff != null && diff < 0 ? "text-down" : "",
+                  )}
+                >
+                  {diff == null ? "—" : `${diff > 0 ? "+" : ""}${formatNumber(diff, 2)}`}
+                </td>
+                <td className="text-sm text-muted">{exitLabel}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function LossTradesAccordion({
   trades,
   targetPoints,
@@ -471,31 +544,52 @@ export function LossTradesAccordion({
   showAlt20After1010?: boolean;
   switchTarget?: SwitchTarget;
 }) {
-  const index = useBacktestIndex();
   if (trades.length === 0) return null;
+  void targetPoints;
+  void showAlt20After1010;
+  void switchTarget;
 
   return (
-    <div className="nf-loss-accordion">
-      <p className="nf-loss-accordion-hint text-muted text-sm">
-        Expand a loss day to load that session’s {index.label} 1-min candles (9:15–15:30). Each row
-        shows Nifty at <strong>10:00:00 IST</strong> vs the exit target. Entry and target levels are
-        overlaid on the chart.
-      </p>
-      {trades.map((trade) => (
-        <SessionDayAccordionItem
-          key={trade.date}
-          trade={trade}
-          targetPoints={trade.targetPoints ?? targetPoints}
-          showAlt20After1010={showAlt20After1010 && Math.abs(trade.change) >= 15}
-          switchTarget={
-            switchTarget ??
-            (Math.abs(trade.change) >= 11 && Math.abs(trade.change) < 15
-              ? { afterIst: "10:01:00", points: 10 }
-              : undefined)
-          }
-          variant="loss"
-        />
-      ))}
+    <div className="table-wrap">
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Day</th>
+            <th className="text-right">9:16 open</th>
+            <th className="text-right">Nifty at exit</th>
+            <th className="text-right">Difference</th>
+          </tr>
+        </thead>
+        <tbody>
+          {trades.map((trade) => {
+            const open916 = trade.entryAt?.indexPrice ?? null;
+            const exit = trade.adverseStopExit ?? trade.sessionEndExit ?? null;
+            const exitNifty = exit?.indexPrice ?? null;
+            const exitClock = exit?.timeIst.slice(0, 5) ?? "—";
+            const diff = open916 != null && exitNifty != null ? exitNifty - open916 : null;
+            const stopped = trade.adverseStopExit != null;
+            return (
+              <tr key={trade.date}>
+                <td className="font-mono">{trade.date}</td>
+                <td>{formatWeekdayFromDateKey(trade.date)}</td>
+                <td className="text-right font-mono">{open916 != null ? formatNumber(open916, 2) : "—"}</td>
+                <td className="text-right font-mono">
+                  {exitNifty != null ? formatNumber(exitNifty, 2) : "—"}
+                  <span className="text-muted">
+                    {" "}
+                    {exitClock}
+                    {!stopped && exit != null ? " · no 40-pt stop" : ""}
+                  </span>
+                </td>
+                <td className={cn("text-right font-mono", diff != null && diff > 0 ? "text-down" : diff != null && diff < 0 ? "text-up" : "")}>
+                  {diff == null ? "—" : `${diff > 0 ? "+" : ""}${formatNumber(diff, 2)}`}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

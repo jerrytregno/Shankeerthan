@@ -1020,6 +1020,64 @@ function minutesFromIstTime(timeIst: string): number {
   return Number(m[1]) * 60 + Number(m[2]);
 }
 
+/** Running adverse points from the 9:16 open through `throughMinute` inclusive. */
+function adverseMaeThroughMinute(
+  entryPx: number,
+  sessionCandles: MinuteCandle[],
+  throughMinute: number,
+  side: "PE" | "CE",
+): number {
+  let mae = 0;
+  for (const c of sessionCandles) {
+    if (c.mins < BACKTEST_EXIT_START_MINUTES || c.mins > throughMinute) continue;
+    const adv = side === "PE" ? c.high - entryPx : entryPx - c.low;
+    if (adv > mae) mae = adv;
+  }
+  return Number(mae.toFixed(2));
+}
+
+/** First minute at or after the checkpoint where Nifty is back at the 9:16 open. */
+function firstReturnToEntryTime(
+  entryPx: number,
+  sessionCandles: MinuteCandle[],
+  fromMinute: number,
+  side: "PE" | "CE",
+): string | null {
+  for (const c of sessionCandles) {
+    if (c.mins < fromMinute || c.mins > SESSION_CLOSE_MINUTES) continue;
+    const back = side === "PE" ? c.low <= entryPx + 1e-9 : c.high + 1e-9 >= entryPx;
+    if (back) return formatIstHms(c.mins * 60);
+  }
+  return null;
+}
+
+/**
+ * Red/green exit at the checkpoint minute only when the 9:16 open is already ≥40 pts against
+ * at that bar's open (matches live rule and loss-table difference).
+ */
+function adverseExitAtCheckpoint(
+  entryPx: number,
+  sessionCandles: MinuteCandle[],
+  minute: number,
+  side: "PE" | "CE",
+): { timeIst: string; indexPrice: number; barExtreme: number } | null {
+  if (!Number.isFinite(entryPx)) return null;
+  const bar = sessionCandles.find((c) => c.mins === minute);
+  if (!bar) return null;
+  const adverseOpen = side === "PE" ? bar.open - entryPx : entryPx - bar.open;
+  if (!(adverseOpen + 1e-9 >= HYBRID916_ADVERSE_STOP_PTS)) return null;
+  return {
+    timeIst: formatIstHms(minute * 60),
+    indexPrice: bar.open,
+    barExtreme: side === "PE" ? bar.high : bar.low,
+  };
+}
+
+/** Red stops at 9:26 · green at 9:17, both at 40 pts against, only if the target has not hit yet. */
+const HYBRID916_ADVERSE_STOP_PTS = 40;
+const HYBRID916_RED_STOP_MINUTE = 9 * 60 + 26;
+const HYBRID916_GREEN_STOP_MINUTE = 9 * 60 + 17;
+
 /** Band from the 9:15 bar — mirrors liveExitModeForRow but runs before the row exists. */
 function breakoutBandForChange(
   direction: NineFifteenDirection,
@@ -1461,6 +1519,13 @@ function buildRowsFromMinuteMap(
       rsi915: rsi915 != null ? Number(rsi915.toFixed(2)) : null,
       rsi916: rsi916 != null ? Number(rsi916.toFixed(2)) : null,
       indexOpenAt1000: bar1000?.open ?? null,
+      peAdverseThrough926: adverseMaeThroughMinute(entryPx, sessionCandles, 9 * 60 + 26, "PE"),
+      ceAdverseThrough917: adverseMaeThroughMinute(entryPx, sessionCandles, 9 * 60 + 17, "CE"),
+      peAdverseStopTouch: adverseExitAtCheckpoint(entryPx, sessionCandles, 9 * 60 + 26, "PE"),
+      ceAdverseStopTouch: adverseExitAtCheckpoint(entryPx, sessionCandles, 9 * 60 + 17, "CE"),
+      indexClose1530: sessionDayClosePx(sessionCandles),
+      peReturnToEntryFrom926: firstReturnToEntryTime(entryPx, sessionCandles, 9 * 60 + 26, "PE"),
+      ceReturnToEntryFrom917: firstReturnToEntryTime(entryPx, sessionCandles, 9 * 60 + 17, "CE"),
       breakoutStopHit,
       breakoutTuesdayTargetHit,
       breakoutStopPoints,
@@ -3413,13 +3478,62 @@ function liveRedPe916HybridRows(
   return liveRedPeFlatHybridRows(liveRedPeMainRows(rows, points));
 }
 
+/**
+ * True when the checkpoint bar open is ≥40 pts against and the profit target has not hit by
+ * that minute. A target touch on or before the stop minute still counts as a win.
+ */
+function hybrid916AdverseStopFired(
+  row: NineFifteenCandleRow,
+  side: Hybrid916Side,
+  targetHit: NineFifteenTargetHit | null,
+): boolean {
+  const deadline = side === "CE" ? HYBRID916_GREEN_STOP_MINUTE : HYBRID916_RED_STOP_MINUTE;
+  if (targetHit != null && minutesFromIstTime(targetHit.timeIst) <= deadline) return false;
+  const touch = side === "CE" ? row.ceAdverseStopTouch : row.peAdverseStopTouch;
+  return touch != null;
+}
+
+function hybrid916ReturnToEntryTime(row: NineFifteenCandleRow, side: Hybrid916Side): string | null {
+  return side === "CE" ? (row.ceReturnToEntryFrom917 ?? null) : (row.peReturnToEntryFrom926 ?? null);
+}
+
+/**
+ * Win if the flat target prints by the stop minute, or — when the 40-pt stop does not fire —
+ * if Nifty returns to the 9:16 open or still hits the flat target later in the session.
+ */
+function hybrid916Outcome(
+  row: NineFifteenCandleRow,
+  gapTargetPoints: number,
+  points: IndexPoints,
+  side: Hybrid916Side,
+): {
+  win: boolean;
+  stopped: boolean;
+  targetHit: NineFifteenTargetHit | null;
+  returnAt: string | null;
+  targetAfterDeadline: boolean;
+} {
+  const targetHit = hybrid916TargetHit(row, gapTargetPoints, points, side);
+  const stopped = hybrid916AdverseStopFired(row, side, targetHit);
+  const deadline = side === "CE" ? HYBRID916_GREEN_STOP_MINUTE : HYBRID916_RED_STOP_MINUTE;
+  const targetInTime = targetHit != null && minutesFromIstTime(targetHit.timeIst) <= deadline;
+  const returnAt = hybrid916ReturnToEntryTime(row, side);
+  const targetAfterDeadline =
+    !stopped &&
+    targetHit != null &&
+    minutesFromIstTime(targetHit.timeIst) > deadline;
+  const win =
+    (targetInTime && !stopped) || (!stopped && returnAt != null) || targetAfterDeadline;
+  return { win, stopped, targetHit, returnAt, targetAfterDeadline };
+}
+
 function hybrid916Hit(
   row: NineFifteenCandleRow,
   gapTargetPoints: number,
   points: IndexPoints,
   side: Hybrid916Side = "PE",
 ): boolean {
-  return hybrid916TargetHit(row, gapTargetPoints, points, side) != null;
+  return hybrid916Outcome(row, gapTargetPoints, points, side).win;
 }
 
 function addCalendarDaysIst(dateKey: string, days: number): string {
@@ -3548,7 +3662,21 @@ function hybrid916CheckpointHit(
   points: IndexPoints,
   side: Hybrid916Side,
 ): boolean {
-  return flatDownTargetHitByCheckpoint(hybrid916TargetHit(row, gapTargetPoints, points, side), cp);
+  const outcome = hybrid916Outcome(row, gapTargetPoints, points, side);
+  if (!outcome.win) return false;
+  const deadline = side === "CE" ? HYBRID916_GREEN_STOP_MINUTE : HYBRID916_RED_STOP_MINUTE;
+  const targetInTime =
+    outcome.targetHit != null && minutesFromIstTime(outcome.targetHit.timeIst) <= deadline;
+  const hit = targetInTime
+    ? outcome.targetHit
+    : outcome.returnAt
+      ? {
+          timeIst: outcome.returnAt,
+          levelLabel: "entry",
+          indexPrice: entryIndexPrice(row) ?? 0,
+        }
+      : null;
+  return flatDownTargetHitByCheckpoint(hit, cp);
 }
 
 function buildHybrid916TradeDayDetail(
@@ -3558,18 +3686,42 @@ function buildHybrid916TradeDayDetail(
   side: Hybrid916Side,
 ): NineFifteenCePeFailureTrade {
   const targetPoints = hybrid916ConfirmOpen(row, side) ? points.backtestTarget15 : gapTargetPoints;
-  const targetHit = hybrid916TargetHit(row, gapTargetPoints, points, side);
+  const outcome = hybrid916Outcome(row, gapTargetPoints, points, side);
   const entryPx = entryIndexPrice(row);
+  const deadline = side === "CE" ? HYBRID916_GREEN_STOP_MINUTE : HYBRID916_RED_STOP_MINUTE;
+  const targetInTime =
+    outcome.targetHit != null && minutesFromIstTime(outcome.targetHit.timeIst) <= deadline;
+  let shownHit: NineFifteenTargetHit | null = null;
+  if (outcome.win) {
+    if (targetInTime && outcome.targetHit) {
+      shownHit = outcome.targetHit;
+    } else if (outcome.targetAfterDeadline && outcome.targetHit) {
+      shownHit = outcome.targetHit;
+    } else if (outcome.returnAt) {
+      shownHit = {
+        timeIst: outcome.returnAt,
+        levelLabel: "entry",
+        indexPrice: entryPx ?? 0,
+      };
+    }
+  }
   const base = buildTradeDayDetail(row, targetPoints, side, points);
   return {
     ...base,
     side,
     targetPoints,
-    targetHit,
-    targetHitAt: targetHit?.timeIst ?? null,
+    targetHit: shownHit,
+    targetHitAt: shownHit?.timeIst ?? null,
     exitTargetIndexPrice:
       entryPx != null ? (side === "CE" ? entryPx + targetPoints : entryPx - targetPoints) : null,
-    winConfirmed: targetHit != null,
+    winConfirmed: outcome.win,
+    adverseStopExit: outcome.stopped
+      ? ((side === "CE" ? row.ceAdverseStopTouch : row.peAdverseStopTouch) ?? null)
+      : null,
+    sessionEndExit:
+      !outcome.win && !outcome.stopped && row.indexClose1530 != null
+        ? { timeIst: "15:30:00", indexPrice: row.indexClose1530 }
+        : null,
   };
 }
 
@@ -3593,6 +3745,8 @@ function buildHybrid916FollowStats(
     .filter((row) => !hybrid916Hit(row, gapTargetPoints, points, side))
     .map((row) => {
       const detail = buildHybrid916TradeDayDetail(row, points, gapTargetPoints, side);
+      const rawHit = hybrid916TargetHit(row, gapTargetPoints, points, side);
+      if (hybrid916AdverseStopFired(row, side, rawHit)) return detail;
       if (!byDate || detail.winConfirmed) return detail;
       const targetPoints = detail.targetPoints ?? points.backtestTarget15;
       const nrmlCarry = computeNrmlCarryOutcome(row, targetPoints, byDate, profile, side);
@@ -4037,7 +4191,7 @@ export function buildTuesdayTenPointStats(
 
 /** Bump when the shape or maths of the result changes — invalidates the on-disk payload. */
 const CACHE_VERSION =
-  "v140:summary-flat-under-15";
+  "v144:916-return-to-entry-win";
 /**
  * Completed sessions never change, so the only thing a rebuild adds is today's session. A short
  * TTL just meant a 4–6 minute rebuild every half hour, which pegs this 2 GB host and slows down

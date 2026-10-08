@@ -37,9 +37,9 @@ export default function NineFifteenPage() {
             <div className="nf-live-rules-col">
               <h3 className="nf-live-rules-heading">9:15 trade · PE or CE at 9:15:11</h3>
               <p className="nf-live-rules-lead text-muted">
-                Burst on the opening minute — red ≥ 5 pts → ATM PE · green ≥ 10 pts → ATM CE. Exit: resting
-                take-profit limit — <strong>PE: Mon/Tue 5%</strong> · <strong>Wed/Thu/Fri 3%</strong> ·{" "}
-                <strong>CE: 3% every day</strong> on capital deployed at fill.
+                Burst on the opening minute — red ≥ 5 pts → ATM PE · green ≥ 10 pts → ATM CE. Exit:{" "}
+                <strong>trailing P&amp;L ladder</strong> on option LTP websocket ticks from{" "}
+                <strong>+3%</strong> (PE and CE) — ratchet targets, exit only on the locked stop floor.
               </p>
               <h4 className="nf-live-rules-subheading">Entry</h4>
               <ol className="nf-live-rules-list">
@@ -84,37 +84,31 @@ export default function NineFifteenPage() {
                   downsize logic.
                 </li>
               </ol>
-              <h4 className="nf-live-rules-subheading">Exit (take-profit limit)</h4>
+              <h4 className="nf-live-rules-subheading">Exit (trailing P&amp;L on option WS tick)</h4>
               <ol className="nf-live-rules-list">
                 <li>
-                  <strong>Take profit — LIMIT sell only</strong> (% on capital deployed = entry premium × quantity,
-                  not Nifty index %). Limit price is entry × (1 + weekday %), rounded to the nearest{" "}
-                  <strong>₹0.05</strong> (NSE option price step). The moment the 9:15:11 buy fills, a resting{" "}
-                  <strong>limit sell</strong> is placed at the price that locks in:
-                  <ul className="nf-live-rules-sublist">
-                    <li>
-                      <strong>PE (put buy)</strong> — <strong>Mon/Tue → 5%</strong> · <strong>Wed/Thu/Fri → 3%</strong>{" "}
-                      on deployed capital
-                    </li>
-                    <li>
-                      <strong>CE (call buy)</strong> — <strong>3% every weekday</strong> on deployed capital
-                    </li>
-                  </ul>
-                  If placement fails, the bot retries instantly until the limit is live on Kite.
+                  <strong>Trailing take-profit</strong> (% on <strong>capital deployed</strong> = entry premium ×
+                  qty, not Nifty index %). On every option LTP websocket tick: first target{" "}
+                  <strong>+3%</strong>. Hitting a target does <strong>not</strong> exit — the bot locks a stop floor
+                  and raises the next target (e.g. +3% → lock +2% / next +4% → +4% → lock +3% / next +6% … through
+                  +50% → lock +30%, then +10% tiers). If P&amp;L falls to the active stop floor,{" "}
+                  <strong>immediate market exit</strong>.
                 </li>
                 <li>
-                  <strong>No trailing ladder</strong> — there is no option P&amp;L stop before the limit fills.
-                  If still open at <strong>3:25 PM</strong>, it is squared off at market regardless of P&amp;L.
+                  <strong>3:25 PM</strong> — square off at market if still open regardless of P&amp;L.
                 </li>
                 <li>
-                  <strong>Market backup</strong> — if the limit never fills and unrealised P&amp;L reaches the
-                  day&apos;s target (PE weekday % or CE 3%), the bot squares off at market.
+                  <strong>9:15:57 flip for 9:16</strong> — from <strong>9:15:57</strong> through 9:15:59, if the leg is{" "}
+                  <strong>not in profit</strong> and Nifty has moved ≥ <strong>15 pts against</strong> the 9:15 leg vs
+                  the <strong>9:15 open</strong> (PE: spot ≥ open + 15 · CE: spot ≤ open − 15),{" "}
+                  <strong>immediate market exit</strong> so the bot can take the 9:16 trade on the sealed 9:15 candle
+                  (|Δ| ≥ 15, red → PE · green → CE). ATM pre-resolve for 9:16 warms from <strong>9:15:58</strong>.
                 </li>
                 <li>
                   <strong>Hard stop — from 10:00 AM IST</strong> — exit at market if Nifty moves{" "}
                   <strong>30 points against</strong> the entry direction from the spot at fill:{" "}
-                  <strong>PE</strong> when spot ≥ entry + 30. Runs alongside the take-profit limit; whichever
-                  hits first closes the leg.
+                  <strong>PE</strong> when spot ≥ entry + 30. Runs alongside the trailing ladder; whichever hits first
+                  closes the leg.
                 </li>
                 <li>
                   <strong>Small-body exit @ 9:16:01</strong> — if the 9:15 leg is still open when the{" "}
@@ -123,17 +117,17 @@ export default function NineFifteenPage() {
                 </li>
               </ol>
               <p className="nf-live-rules-foot text-muted">
-                When the 9:15 leg closes before 9:16:00, the 9:16 decision still runs at 9:16:01 unless the
+                When the 9:15 leg closes before 9:16:00, the 9:16 decision still runs at 9:16:00 unless the
                 9:15 trade is still open.
               </p>
             </div>
 
             {/* —— 9:16 trade —— */}
             <div className="nf-live-rules-col">
-              <h3 className="nf-live-rules-heading">9:16 trade · PE or CE at 9:16:01</h3>
+              <h3 className="nf-live-rules-heading">9:16 trade · PE or CE at 9:16:00</h3>
               <p className="nf-live-rules-lead text-muted">
                 Second morning leg on the same server bot — 9:15 candle with |Δ| ≥ 15 buys ATM PE when red or ATM
-                CE when green at 9:16:01. Always armed on the server alongside the 9:15 trade.
+                CE when green at 9:16:00. Always armed on the server alongside the 9:15 trade.
               </p>
               <h4 className="nf-live-rules-subheading">Entry</h4>
               <ol className="nf-live-rules-list">
@@ -157,12 +151,13 @@ export default function NineFifteenPage() {
                   <strong>9:16:00</strong> (logged as 9:15:59 close).
                 </li>
                 <li>
-                  <strong>Order at 9:16:01.000</strong> (dedicated timer) · option websocket armed from{" "}
+                  <strong>Order on the first Nifty websocket tick @ 9:16:00</strong> · option websocket armed from{" "}
                   <strong>9:15:58</strong> (ATM CE + PE pre-resolved), so the latest option price is already known —
-                  no waiting for new ticks.
+                  no waiting for a new option tick. If no tick prints in that second, entry falls back at 9:16:01
+                  using the sealed 9:15:59 close.
                 </li>
                 <li>
-                  <strong>Entry = NRML market BUY</strong> at 9:16:01 · lots sized on the latest option websocket
+                  <strong>Entry = NRML market BUY</strong> at 9:16:00 (WS tick) · lots sized on the latest option websocket
                   price plus a <strong>3% margin cushion</strong> (Kite blocks margin a little above the last price
                   for market orders) · retries until <strong>9:16:30</strong>.
                 </li>
@@ -243,20 +238,36 @@ export default function NineFifteenPage() {
                 </li>
                 <li>
                   <strong>No trailing ladder</strong> — there is no option P&amp;L stop before the limit fills,
-                  the index target, the hard stop, or the market backup fires.
+                  the index target, the adverse checkpoint / entry return, or the market backup fires.
                 </li>
                 <li>
-                  <strong>Hard stop — from 10:00 AM IST</strong> — same as the 9:15 leg: exit at market when Nifty
-                  is <strong>30 pts adverse</strong> from entry spot (PE ≥ entry + 30 · CE ≤ entry − 30). Runs
-                  alongside the take-profit limit and parallel index exit; first wins.
+                  <strong>Adverse checkpoint + entry return (websocket tick)</strong> — measured from the Nifty spot
+                  at fill; runs alongside the take-profit limit and parallel index exit; first wins.
+                  <ul className="nf-live-rules-sublist">
+                    <li>
+                      <strong>PE (put buy)</strong> — on the first Nifty websocket tick at or after{" "}
+                      <strong>9:26:00 IST</strong>, exit at market if Nifty ≥ <strong>entry spot + 40</strong>.
+                    </li>
+                    <li>
+                      <strong>CE (call buy)</strong> — on the first Nifty websocket tick at or after{" "}
+                      <strong>9:17:00 IST</strong>, exit at market if Nifty ≤ <strong>entry spot − 40</strong>.
+                    </li>
+                    <li>
+                      If that checkpoint does <strong>not</strong> trip the 40-pt stop, the bot arms an{" "}
+                      <strong>entry return</strong> exit and squares off at market the instant Nifty touches the
+                      entry spot again (PE: spot ≤ entry · CE: spot ≥ entry) on any later websocket tick.
+                    </li>
+                  </ul>
+                  The 9:15 leg still uses the <strong>10:00 AM ±30</strong> hard stop; the 9:16 leg does not.
                 </li>
                 <li>
                   <strong>3:25 PM</strong> force square-off if still open.
                 </li>
                 <li>
-                  <strong>How exits fire</strong> — the index exit and hard stop (9:15 and 9:16 legs) are checked on{" "}
-                  <strong>every Nifty websocket tick</strong> (about 4 a second), plus a <strong>1-second safety
-                  check</strong> that runs even if the rest of the bot stalls; they never wait behind a Kite request.
+                  <strong>How exits fire</strong> — parallel index exit, adverse checkpoint, and entry return (9:16)
+                  plus the 9:15 hard stop are checked on <strong>every Nifty websocket tick</strong> (about 4 a
+                  second), plus a <strong>1-second safety check</strong> that runs even if the rest of the bot
+                  stalls; they never wait behind a Kite request.
                   On the triggering tick the take-profit limit is cancelled and the{" "}
                   <strong>whole position is sold at market</strong> in parallel orders (max 25 lots each, up to 9 at
                   once); fills are checked every <strong>0.2 s</strong>. If the take-profit limit was just confirmed
