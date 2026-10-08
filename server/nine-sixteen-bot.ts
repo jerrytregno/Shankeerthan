@@ -55,7 +55,10 @@ import {
   is915BodyBelowMinPts,
   NINE_FIFTEEN_MIN_DROP_PTS,
   NINE_FIFTEEN_TAKE_PROFIT_PCT,
-  getNineFifteenTakeProfitPct,
+  NINE_FIFTEEN_TAKE_PROFIT_PCT_LATE,
+  getNineFifteenLiveTakeProfitPct,
+  isPastNineFifteenTpStepDown,
+  msUntilNineFifteenTpStepDown,
   nineFifteenTakeProfitLimitPrice,
   nineFifteenTakeProfitAmount,
   nineFifteenDeployedCapital,
@@ -306,7 +309,7 @@ interface PersistedBotState {
   nineFifteenTpFilledQty?: number;
   nineFifteenTpPendingQty?: number;
   nineFifteenTpPlacedAt?: string;
-  /** Take-profit % armed for this 9:15 leg (Mon/Tue 5% · Wed/Thu/Fri 3%). */
+  /** Take-profit % armed for this 9:15/9:16 leg (9:15 starts at 3%, then 2% from 9:15:40). */
   nineFifteenTakeProfitPct?: number;
   /** First Nifty WS tick at 9:16:00 — vs 9:15:59 close for hybrid index exit tier. */
   capturedOpen916Nifty?: number;
@@ -360,6 +363,8 @@ let nineFifteenSmallBodyExitInFlight = false;
 let nineFifteenBurstInFlight = false;
 let nineFifteenTimer: ReturnType<typeof setTimeout> | null = null;
 let nineFifteenTimerDate: string | null = null;
+let nineFifteenTpStepDownTimer: ReturnType<typeof setTimeout> | null = null;
+let nineFifteenTpStepDownInFlight = false;
 /** Resting take-profit limit sell for the 9:15 leg. */
 let nineFifteenTpOrderIds: string[] = [];
 let nineFifteenTpLimitPrice = 0;
@@ -659,7 +664,7 @@ const NINE_FIFTEEN_TP_PLACE_MAX_ATTEMPTS = 15;
 
 function legTakeProfitPctForSlot(dateIst: string): number {
   return tradeSlot === "nine-fifteen"
-    ? getNineFifteenTakeProfitPct(dateIst, leg)
+    ? getNineFifteenLiveTakeProfitPct()
     : getNineSixteenTakeProfitPct(dateIst, leg);
 }
 
@@ -773,7 +778,7 @@ function loadBotState(dateIst: string) {
     nineFifteenTakeProfitPct =
       parsed.nineFifteenTakeProfitPct ??
       (tradeSlot === "nine-fifteen"
-        ? getNineFifteenTakeProfitPct(dateIst, leg)
+        ? getNineFifteenLiveTakeProfitPct()
         : getNineSixteenTakeProfitPct(dateIst, leg));
     capturedOpen916Nifty = parsed.capturedOpen916Nifty ?? null;
     capturedClose91559 = parsed.capturedClose91559 ?? null;
@@ -1929,10 +1934,14 @@ async function syncLegTakeProfitOrders(
   }
 }
 
-async function placeLegTakeProfitOrders(accessToken: string, dateIst: string): Promise<boolean> {
+async function placeLegTakeProfitOrders(
+  accessToken: string,
+  dateIst: string,
+  tpPctOverride?: number,
+): Promise<boolean> {
   if (!tradingsymbol || quantity <= 0 || entryPrice <= 0) return false;
 
-  nineFifteenTakeProfitPct = legTakeProfitPctForSlot(dateIst);
+  nineFifteenTakeProfitPct = tpPctOverride ?? legTakeProfitPctForSlot(dateIst);
   const tpPct = nineFifteenTakeProfitPct;
   const tag = legTradeTag();
   const limitPrice = nineFifteenTakeProfitLimitPrice(entryPrice, tpPct);
@@ -2000,6 +2009,42 @@ async function placeLegTakeProfitOrders(accessToken: string, dateIst: string): P
   );
   saveBotState(dateIst);
   return false;
+}
+
+/**
+ * At 9:15:40, if the 9:15:11 trade is still open, cancel the +3% limit and replace it with +2%.
+ * Also used as a poll backstop if the dedicated timer is missed (restart, clock skew).
+ */
+async function maybeStepDownNineFifteenTakeProfit(accessToken: string, dateIst: string): Promise<void> {
+  if (tradeSlot !== "nine-fifteen" || phase !== "in_position") return;
+  if (!isPastNineFifteenTpStepDown()) return;
+  if (quantity <= 0 || entryPrice <= 0) return;
+  if (nineFifteenTpOrderStatus === "complete") return;
+
+  const lateLimit = nineFifteenTakeProfitLimitPrice(entryPrice, NINE_FIFTEEN_TAKE_PROFIT_PCT_LATE);
+  const alreadyLate =
+    nineFifteenTakeProfitPct <= NINE_FIFTEEN_TAKE_PROFIT_PCT_LATE + 1e-9 &&
+    (nineFifteenTpOrderIds.length === 0 ||
+      !(nineFifteenTpLimitPrice > 0) ||
+      Math.abs(nineFifteenTpLimitPrice - lateLimit) < 0.05);
+  if (alreadyLate) return;
+
+  if (nineFifteenTpFilledQty >= quantity && nineFifteenTpFilledQty > 0) {
+    await completeLegTakeProfitExit(accessToken, dateIst, "limit");
+    return;
+  }
+
+  const remaining = Math.max(0, quantity - nineFifteenTpFilledQty);
+  if (nineFifteenTpFilledQty > 0 && remaining > 0 && remaining < quantity) {
+    quantity = remaining;
+  }
+
+  const fromPct = nineFifteenTakeProfitPct;
+  pushLog(
+    `9:15 still open at 9:15:40 · moving TP limit from +${fromPct}% to +${NINE_FIFTEEN_TAKE_PROFIT_PCT_LATE}%`,
+    "info",
+  );
+  await placeLegTakeProfitOrders(accessToken, dateIst, NINE_FIFTEEN_TAKE_PROFIT_PCT_LATE);
 }
 
 async function completeLegTakeProfitExit(
@@ -3277,6 +3322,8 @@ async function checkAndMaybeExitTakeProfitLeg(accessToken: string, dateIst: stri
 
   loopStep = "take-profit order sync (Kite /orders)";
   await syncLegTakeProfitOrders(accessToken, dateIst);
+  await maybeStepDownNineFifteenTakeProfit(accessToken, dateIst);
+  if (phase !== "in_position") return true;
 
   if (
     nineFifteenTpOrderStatus === "failed" &&
@@ -3825,6 +3872,44 @@ function armNineFifteenTimer() {
   }
 }
 
+async function runNineFifteenTpStepDown() {
+  if (nineFifteenTpStepDownInFlight) return;
+  if (tradeSlot !== "nine-fifteen" || phase !== "in_position") return;
+  if (nineFifteenTakeProfitPct <= NINE_FIFTEEN_TAKE_PROFIT_PCT_LATE + 1e-9) return;
+
+  const session = loadKiteSession();
+  if (!session?.accessToken) return;
+
+  nineFifteenTpStepDownInFlight = true;
+  try {
+    const ctx = getIndianMarketContext();
+    await maybeStepDownNineFifteenTakeProfit(session.accessToken, ctx.dateIST);
+  } catch (err) {
+    pushLog(
+      `9:15:40 TP step-down failed · ${err instanceof Error ? err.message : "unknown"}`,
+      "warning",
+    );
+  } finally {
+    nineFifteenTpStepDownInFlight = false;
+  }
+}
+
+/** Fire the 3% → 2% limit rewrite the instant 9:15:40 arrives. */
+function armNineFifteenTpStepDownTimer() {
+  if (tradeSlot !== "nine-fifteen" || phase !== "in_position") return;
+  if (nineFifteenTakeProfitPct <= NINE_FIFTEEN_TAKE_PROFIT_PCT_LATE + 1e-9) return;
+  if (nineFifteenTpStepDownInFlight) return;
+
+  const delay = msUntilNineFifteenTpStepDown();
+  if (delay < 0 || delay > 10 * 60 * 1000) return;
+
+  if (nineFifteenTpStepDownTimer) clearTimeout(nineFifteenTpStepDownTimer);
+  nineFifteenTpStepDownTimer = setTimeout(() => {
+    nineFifteenTpStepDownTimer = null;
+    void runNineFifteenTpStepDown();
+  }, delay);
+}
+
 /**
  * Aim a one-shot timer at 9:16:01.000 IST. Re-armed on every poll so the delay is recomputed
  * from the wall clock each time: one long setTimeout would drift under load and would not
@@ -3862,10 +3947,18 @@ function scheduleNext() {
   }
   if (nineFifteenEnabled) {
     armNineFifteenTimer();
+    armNineFifteenTpStepDownTimer();
   } else if (nineFifteenTimer) {
     clearTimeout(nineFifteenTimer);
     nineFifteenTimer = null;
     nineFifteenTimerDate = null;
+  }
+  if (
+    nineFifteenTpStepDownTimer &&
+    (tradeSlot !== "nine-fifteen" || phase !== "in_position")
+  ) {
+    clearTimeout(nineFifteenTpStepDownTimer);
+    nineFifteenTpStepDownTimer = null;
   }
   if (timer) clearTimeout(timer);
   const has915Ohlc =

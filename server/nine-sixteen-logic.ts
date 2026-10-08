@@ -980,48 +980,55 @@ export function shouldExitOnTrailingPnl(lockedStopPct: number, pnlPct: number | 
 }
 
 /* ---------------------------------------------------------------------------------------------
- * 9:15 exit — PE: Mon/Tue 5% · Wed/Thu/Fri 3% · CE: 3% every day · 3:25 PM square-off.
+ * 9:15 exit — 3% take-profit every day · 2% if still open at 9:15:40 · 3:25 PM square-off.
  * ------------------------------------------------------------------------------------------- */
 
-/** Take-profit on Monday (and unknown weekdays) for the 9:15 PE leg. */
-export const NINE_FIFTEEN_TAKE_PROFIT_PCT = 5;
-/** Take-profit on every weekday for the 9:15 CE leg. */
-export const NINE_FIFTEEN_CE_TAKE_PROFIT_PCT = 3;
-/** Take-profit on Wednesday. */
-export const NINE_FIFTEEN_TAKE_PROFIT_PCT_WEDNESDAY = 3;
-/** Take-profit on Thursday. */
-export const NINE_FIFTEEN_TAKE_PROFIT_PCT_THURSDAY = 3;
-/** Take-profit on Friday. */
-export const NINE_FIFTEEN_TAKE_PROFIT_PCT_FRIDAY = 3;
-/** Take-profit on Tuesday for the 9:15 PE leg. */
-export const NINE_FIFTEEN_TAKE_PROFIT_PCT_TUESDAY = 5;
-/** @deprecated Mon/Wed/Thu used to be 3% — kept so older imports do not break. */
+/** Initial 9:15 take-profit on capital deployed, every weekday, both CE and PE. */
+export const NINE_FIFTEEN_TAKE_PROFIT_PCT = 3;
+/** If the 9:15:11 trade is still open at 9:15:40, the limit sell is moved to this %. */
+export const NINE_FIFTEEN_TAKE_PROFIT_PCT_LATE = 2;
+/** @deprecated Same as {@link NINE_FIFTEEN_TAKE_PROFIT_PCT} — weekday split removed. */
+export const NINE_FIFTEEN_CE_TAKE_PROFIT_PCT = NINE_FIFTEEN_TAKE_PROFIT_PCT;
+/** @deprecated Same as {@link NINE_FIFTEEN_TAKE_PROFIT_PCT}. */
+export const NINE_FIFTEEN_TAKE_PROFIT_PCT_WEDNESDAY = NINE_FIFTEEN_TAKE_PROFIT_PCT;
+/** @deprecated Same as {@link NINE_FIFTEEN_TAKE_PROFIT_PCT}. */
+export const NINE_FIFTEEN_TAKE_PROFIT_PCT_THURSDAY = NINE_FIFTEEN_TAKE_PROFIT_PCT;
+/** @deprecated Same as {@link NINE_FIFTEEN_TAKE_PROFIT_PCT}. */
+export const NINE_FIFTEEN_TAKE_PROFIT_PCT_FRIDAY = NINE_FIFTEEN_TAKE_PROFIT_PCT;
+/** @deprecated Same as {@link NINE_FIFTEEN_TAKE_PROFIT_PCT} — Tuesday is no longer 5%. */
+export const NINE_FIFTEEN_TAKE_PROFIT_PCT_TUESDAY = NINE_FIFTEEN_TAKE_PROFIT_PCT;
+/** @deprecated Same as {@link NINE_FIFTEEN_TAKE_PROFIT_PCT}. */
 export const NINE_FIFTEEN_TAKE_PROFIT_PCT_EARLY = NINE_FIFTEEN_TAKE_PROFIT_PCT;
+/** Wall-clock second when an open 9:15 limit is stepped from 3% to 2%. */
+export const NINE_FIFTEEN_TP_STEP_DOWN_SEC = 9 * 3600 + 15 * 60 + 40;
 
-function nineFifteenTpSideFromLeg(leg?: string | null): "CE" | "PE" | null {
-  if (!leg) return null;
-  if (leg.startsWith("CE")) return "CE";
-  if (leg.startsWith("PE")) return "PE";
-  return null;
+/** Initial 9:15 take-profit — 3% every day, both legs. Date and side kept so older callers still type-check. */
+export function getNineFifteenTakeProfitPct(_dateIst?: string, _leg?: string | null): number {
+  return NINE_FIFTEEN_TAKE_PROFIT_PCT;
 }
 
-/** PE Mon/Tue 5% · Wed/Thu/Fri 3% · CE 3% every day. */
-export function getNineFifteenTakeProfitPct(dateIst?: string, leg?: string | null): number {
-  if (nineFifteenTpSideFromLeg(leg) === "CE") return NINE_FIFTEEN_CE_TAKE_PROFIT_PCT;
-  if (!dateIst) return NINE_FIFTEEN_TAKE_PROFIT_PCT;
-  const weekday = istWeekdayShortFromDateKey(dateIst);
-  if (weekday === "Tue") return NINE_FIFTEEN_TAKE_PROFIT_PCT_TUESDAY;
-  if (weekday === "Wed") return NINE_FIFTEEN_TAKE_PROFIT_PCT_WEDNESDAY;
-  if (weekday === "Thu") return NINE_FIFTEEN_TAKE_PROFIT_PCT_THURSDAY;
-  if (weekday === "Fri") return NINE_FIFTEEN_TAKE_PROFIT_PCT_FRIDAY;
-  return NINE_FIFTEEN_TAKE_PROFIT_PCT;
+/** Live 9:15 take-profit: 3% until 9:15:40 IST, then 2% while the trade is still open. */
+export function getNineFifteenLiveTakeProfitPct(nowMs = Date.now()): number {
+  return isPastNineFifteenTpStepDown(nowMs)
+    ? NINE_FIFTEEN_TAKE_PROFIT_PCT_LATE
+    : NINE_FIFTEEN_TAKE_PROFIT_PCT;
+}
+
+/** True from 9:15:40.000 IST onward. */
+export function isPastNineFifteenTpStepDown(nowMs = Date.now()): boolean {
+  return istSecondsOfDay(new Date(nowMs)) >= NINE_FIFTEEN_TP_STEP_DOWN_SEC;
+}
+
+/** Signed ms until 9:15:40.000 IST — negative once it has passed. */
+export function msUntilNineFifteenTpStepDown(nowMs = Date.now()): number {
+  return NINE_FIFTEEN_TP_STEP_DOWN_SEC * 1000 - istMsOfDay(nowMs);
 }
 
 /** One-line schedule for UI copy. */
 export function describeNineFifteenTakeProfitSchedule(): string {
   return (
-    `PE Mon/Tue ${NINE_FIFTEEN_TAKE_PROFIT_PCT}% · Wed–Fri ${NINE_FIFTEEN_TAKE_PROFIT_PCT_WEDNESDAY}% · ` +
-    `CE ${NINE_FIFTEEN_CE_TAKE_PROFIT_PCT}% all days`
+    `${NINE_FIFTEEN_TAKE_PROFIT_PCT}% every day · ` +
+    `${NINE_FIFTEEN_TAKE_PROFIT_PCT_LATE}% if still open at 9:15:40`
   );
 }
 
