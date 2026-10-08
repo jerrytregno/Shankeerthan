@@ -45,7 +45,6 @@ import {
   loadBrokerFillsSnapshot,
   reconcileBrokerFillsWithSession,
 } from "./broker-trades.js";
-import { deleteBotTradeLog } from "./bot-trade-log.js";
 import {
   clearNiftyLogTest,
   getNiftyLogTestStatus,
@@ -70,10 +69,19 @@ const app = express();
 const KITE_BASE = "https://api.kite.trade";
 const TOKEN_COOKIE = "kite_access_token";
 
-function getAppUrl() {
+/** Public origin of the request as seen behind nginx, e.g. `https://tradinganalystshan.com`. */
+function requestOrigin(req: express.Request): string | null {
+  const host = (req.header("x-forwarded-host") ?? req.header("host"))?.split(",")[0].trim();
+  if (!host || /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host)) return null;
+  const proto = (req.header("x-forwarded-proto") ?? req.protocol).split(",")[0].trim();
+  return `${proto}://${host}`;
+}
+
+function getAppUrl(req?: express.Request) {
   if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, "");
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "http://localhost:5173";
+  const origin = req && process.env.NODE_ENV === "production" ? requestOrigin(req) : null;
+  return origin ?? "http://localhost:5173";
 }
 
 function cookieOptions() {
@@ -88,10 +96,27 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-function getKiteConfig() {
+/** Backtest studies withheld from the shipped app; their pages are not routed in the client either. */
+const DISABLED_API_PATHS = new Set([
+  "/api/kite/nine-fifteen-candles",
+  "/api/kite/index-session-minutes",
+  "/api/kite/nine-fifteen-high-minus5-backtest",
+  "/api/kite/nifty-one-hour-backtest",
+  "/api/kite/nifty-rsi-speed-backtest",
+  "/api/kite/nifty-rsi-backtest",
+]);
+
+app.use((req, res, next) => {
+  if (DISABLED_API_PATHS.has(req.path.toLowerCase().replace(/\/+$/, ""))) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  next();
+});
+
+function getKiteConfig(req?: express.Request) {
   const apiKey = process.env.KITE_API_KEY;
   const apiSecret = process.env.KITE_API_SECRET;
-  const appUrl = getAppUrl();
+  const appUrl = getAppUrl(req);
 
   if (!apiKey || apiKey === "your_api_key") {
     return { configured: false as const, apiKey: null, apiSecret: null, appUrl };
@@ -100,8 +125,8 @@ function getKiteConfig() {
   return { configured: true as const, apiKey, apiSecret: apiSecret ?? "", appUrl };
 }
 
-function getLoginUrl() {
-  const config = getKiteConfig();
+function getLoginUrl(req?: express.Request) {
+  const config = getKiteConfig(req);
   if (!config.configured || !config.apiKey) return null;
   const redirectUrl = `${config.appUrl}/api/kite/callback`;
   return `https://kite.zerodha.com/connect/login?v=3&api_key=${config.apiKey}&redirect_url=${encodeURIComponent(redirectUrl)}`;
@@ -146,7 +171,7 @@ app.get("/api/kite/status", async (req, res) => {
         configured: true,
         connected: true,
         profile,
-        loginUrl: getLoginUrl(),
+        loginUrl: getLoginUrl(req),
         autoLogin: getKiteAutoLoginStatus(),
       });
     } catch {
@@ -159,7 +184,7 @@ app.get("/api/kite/status", async (req, res) => {
     configured: true,
     connected: false,
     profile: null,
-    loginUrl: getLoginUrl(),
+    loginUrl: getLoginUrl(req),
     autoLogin: getKiteAutoLoginStatus(),
   });
 });
@@ -278,7 +303,7 @@ app.get("/api/kite/trading-ip", async (req, res) => {
 app.get("/api/kite/callback", async (req, res) => {
   const requestToken = req.query.request_token as string | undefined;
   const status = req.query.status as string | undefined;
-  const config = getKiteConfig();
+  const config = getKiteConfig(req);
   const base = config.appUrl;
 
   if (status === "success" && requestToken && config.configured) {
@@ -851,21 +876,6 @@ app.post("/api/trades/reconcile", async (_req, res) => {
     return res.json({ data: store.trades, meta: { updatedAt: store.updatedAt, reconcile: result } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to reconcile with Zerodha";
-    return res.status(500).json({ error: message });
-  }
-});
-
-/** Destructive, so it answers only the signed-in app user. */
-app.delete("/api/trades/:id", async (req, res) => {
-  if (!(await isRequestFromSignedInUser(req))) {
-    return res.status(401).json({ error: "Sign in to the app first" });
-  }
-  try {
-    const { removed, store } = await deleteBotTradeLog(req.params.id);
-    if (!removed) return res.status(404).json({ error: "Trade log not found" });
-    return res.json({ data: store.trades, meta: { updatedAt: store.updatedAt } });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to delete trade log";
     return res.status(500).json({ error: message });
   }
 });

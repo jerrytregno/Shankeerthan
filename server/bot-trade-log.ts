@@ -51,21 +51,6 @@ export async function appendBotTradeLog(trade: BotTradeLog): Promise<BotTradeLog
   return next;
 }
 
-/**
- * Drop one log by id. Used to clear a record that never corresponded to a real trade — e.g. the
- * phantom leg a bot books when it adopts another bot's position in the same contract.
- */
-export async function deleteBotTradeLog(id: string): Promise<{ removed: boolean; store: BotTradeLogStore }> {
-  const store = await loadBotTradeLogs();
-  const remaining = store.trades.filter((row) => row.id !== id);
-  if (remaining.length === store.trades.length) return { removed: false, store };
-
-  const next: BotTradeLogStore = { trades: remaining, updatedAt: new Date().toISOString() };
-  await ensureDir();
-  await fs.writeFile(LOG_PATH, JSON.stringify(next, null, 2), "utf-8");
-  return { removed: true, store: next };
-}
-
 export function makeBotTradeLogId(dateIst: string, tradingsymbol: string | null): string {
   const suffix = tradingsymbol ?? "session";
   return `${dateIst}-${suffix}-${Date.now()}`;

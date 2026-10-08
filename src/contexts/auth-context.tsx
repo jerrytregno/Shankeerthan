@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  createUserWithEmailAndPassword,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
@@ -18,6 +19,7 @@ interface AuthContextValue {
   user: User | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
+  signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -51,12 +53,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const signUp = async (email: string, password: string) => {
+    if (!isAllowedAuthEmail(email)) {
+      throw new Error(authNotAllowedMessage());
+    }
+    await createUserWithEmailAndPassword(auth, email, password);
+  };
+
   const signOut = async () => {
     await firebaseSignOut(auth);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>
       {children}
     </AuthContext.Provider>
   );

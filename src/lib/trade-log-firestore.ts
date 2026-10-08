@@ -1,6 +1,5 @@
 import {
   collection,
-  deleteDoc,
   getDocs,
   doc,
   onSnapshot,
@@ -11,7 +10,6 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import type { BotTradeLog } from "@/types/trade-log";
-import { auth } from "@/lib/firebase";
 import { db } from "@/lib/firestore";
 
 function tradeLogsCollection(userId: string) {
@@ -99,28 +97,6 @@ export async function syncServerTradesToFirestore(userId: string): Promise<SyncR
   }
 
   return { synced, total: trades.length };
-}
-
-/**
- * Remove a trade log from both stores. Firestore is what the Trades page reads, and the server
- * JSON is what re-populates it on the next sync, so deleting one alone would bring it straight
- * back. The server copy goes first: if that fails there is nothing to undo, whereas dropping the
- * Firestore doc first would resurrect it on the next visit.
- */
-export async function deleteTradeLog(userId: string, tradeId: string): Promise<void> {
-  const token = await auth.currentUser?.getIdToken();
-  const res = await fetch(`/api/trades/${encodeURIComponent(tradeId)}`, {
-    method: "DELETE",
-    credentials: "include",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  // A 404 means the server already has no such log, which still leaves the Firestore copy to clear.
-  if (!res.ok && res.status !== 404) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ?? "Failed to delete the trade log on the server");
-  }
-
-  await deleteDoc(doc(tradeLogsCollection(userId), tradeId));
 }
 
 export function subscribeTradeLogs(

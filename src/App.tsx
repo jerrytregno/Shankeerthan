@@ -1,17 +1,10 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import LoginPage from "@/pages/LoginPage";
 import NineFifteenPage from "@/pages/NineFifteenPage";
-import BacktestingPage from "@/pages/BacktestingPage";
-import NineSixteenGreenBacktestPage from "@/pages/NineSixteenGreenBacktestPage";
 import PortfolioPage from "@/pages/PortfolioPage";
 import SettingsPage from "@/pages/SettingsPage";
 import TradePage from "@/pages/TradePage";
 import LogTestPage from "@/pages/LogTestPage";
-import NineFifteenBacktestPage from "@/pages/NineFifteenBacktestPage";
-import NiftyOneHourBacktestPage from "@/pages/NiftyOneHourBacktestPage";
-import NiftyRsiBacktestPage from "@/pages/NiftyRsiBacktestPage";
-import NiftyRsiSpeedBacktestPage from "@/pages/NiftyRsiSpeedBacktestPage";
-
 export default function App() {
   return (
     <Routes>
@@ -19,12 +12,6 @@ export default function App() {
       <Route path="/login" element={<Navigate to="/" replace />} />
       <Route path="/dashboard" element={<Navigate to="/dashboard/nine-fifteen" replace />} />
       <Route path="/dashboard/nine-fifteen" element={<NineFifteenPage />} />
-      <Route path="/dashboard/backtesting" element={<BacktestingPage />} />
-      <Route path="/dashboard/backtesting-green" element={<NineSixteenGreenBacktestPage />} />
-      <Route path="/dashboard/nine-fifteen-backtest" element={<NineFifteenBacktestPage />} />
-      <Route path="/dashboard/nifty-one-hour" element={<NiftyOneHourBacktestPage />} />
-      <Route path="/dashboard/nifty-rsi" element={<NiftyRsiBacktestPage />} />
-      <Route path="/dashboard/nifty-rsi-speed" element={<NiftyRsiSpeedBacktestPage />} />
       <Route path="/dashboard/log-test" element={<LogTestPage />} />
       <Route path="/dashboard/trades" element={<TradePage />} />
       <Route path="/dashboard/portfolio" element={<PortfolioPage />} />
