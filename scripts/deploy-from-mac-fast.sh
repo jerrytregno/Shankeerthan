@@ -38,6 +38,10 @@ rsync -avz --delete \
   --exclude 'data/momentum-scalper-ran-*.json' \
   --exclude data/broker-fills \
   --exclude data/ticks \
+  --exclude data/morning-ws-tick-firebase-upload.json \
+  --exclude data/win-backtest.json.gz \
+  --exclude data/win-backtest.meta.json \
+  --exclude data/ticks \
   . "$HOST:$REMOTE_DIR/"
 
 echo "==> remote deploy (skip npm install)"

@@ -38,7 +38,22 @@
 .pat-head-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.5rem;
+}
+
+.pat-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  user-select: none;
+}
+
+.pat-toggle-label input {
+  accent-color: var(--primary);
 }
 
 .pat-stop {

@@ -22,6 +22,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const FIRESTORE_COLLECTION = "morningWsTicks";
 const STORAGE_PREFIX = "morning-ws-ticks";
+/** Stay under Firestore's 1 MiB document limit once field overhead is included. */
+const TICK_JSON_BUDGET = 700_000;
 
 export interface MorningWsTickUploadState {
   dateIST: string;
@@ -95,17 +97,86 @@ async function readFilteredTicks(dateIst: string): Promise<RawTickRow[]> {
   return rows;
 }
 
+function packTickChunks(ticks: RawTickRow[]): string[] {
+  const chunks: string[] = [];
+  let batch: RawTickRow[] = [];
+  let bytes = 2;
+  const flush = () => {
+    if (batch.length === 0) return;
+    chunks.push(JSON.stringify(batch));
+    batch = [];
+    bytes = 2;
+  };
+  for (const tick of ticks) {
+    const extra = Buffer.byteLength(JSON.stringify(tick)) + 1;
+    if (batch.length > 0 && bytes + extra > TICK_JSON_BUDGET) flush();
+    batch.push(tick);
+    bytes += extra;
+  }
+  flush();
+  return chunks.length > 0 ? chunks : ["[]"];
+}
+
+async function saveTicksInFirestore(
+  dateIst: string,
+  ticks: RawTickRow[],
+  state: MorningWsTickUploadState,
+): Promise<void> {
+  const db = getAdminFirestore();
+  if (!db) throw new Error("Firestore is not configured");
+  const parent = db.collection(FIRESTORE_COLLECTION).doc(dateIst);
+  const chunks = packTickChunks(ticks);
+  const base = {
+    ...state,
+    sourceFile: tickFilePath(dateIst),
+    chunkCount: chunks.length,
+  };
+  if (chunks.length === 1) {
+    await parent.set({ ...base, ticksJson: chunks[0] });
+    return;
+  }
+  await parent.set(base);
+  for (let i = 0; i < chunks.length; i += 1) {
+    await parent.collection("chunks").doc(String(i).padStart(4, "0")).set({ ticksJson: chunks[i] });
+  }
+}
+
+/** Storage is optional. A missing bucket must not block the Firestore copy. */
+async function trySaveStorageCopy(dateIst: string, ticks: RawTickRow[], windowLabel: string): Promise<string> {
+  const bucket = getAdminStorageBucket();
+  if (!bucket) return "";
+  const storagePath = `${STORAGE_PREFIX}/${dateIst}/0915-0920.jsonl`;
+  const body = ticks.length > 0 ? `${ticks.map((t) => JSON.stringify(t)).join("\n")}\n` : "";
+  try {
+    await bucket.file(storagePath).save(body, {
+      contentType: "application/x-ndjson",
+      metadata: {
+        metadata: {
+          dateIST: dateIst,
+          windowLabel,
+          tickCount: String(ticks.length),
+        },
+      },
+    });
+    return storagePath;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[morning-ws-tick-archive] storage copy skipped for ${dateIst}: ${message}`);
+    return "";
+  }
+}
+
 export async function uploadMorningWsTicksForDate(dateIst: string): Promise<MorningWsTickUploadState> {
   const db = getAdminFirestore();
-  const bucket = getAdminStorageBucket();
-  if (!db || !bucket) {
-    throw new Error("Firebase Admin is not configured (service account missing)");
+  if (!db) {
+    throw new Error("Firestore is not configured");
   }
 
   const index = loadUploadIndex();
   const existing = index.byDate[dateIst];
   if (existing?.uploadedAt) {
-    return existing;
+    const snap = await db.collection(FIRESTORE_COLLECTION).doc(dateIst).get();
+    if (snap.exists) return existing;
   }
 
   flushWsTickLogToDisk();
@@ -115,19 +186,7 @@ export async function uploadMorningWsTicksForDate(dateIst: string): Promise<Morn
   const optionCount = ticks.filter((t) => t.kind === "option").length;
 
   const windowLabel = "09:15:00–09:20:59 IST";
-  const storagePath = `${STORAGE_PREFIX}/${dateIst}/0915-0920.jsonl`;
-  const body = ticks.length > 0 ? `${ticks.map((t) => JSON.stringify(t)).join("\n")}\n` : "";
-
-  await bucket.file(storagePath).save(body, {
-    contentType: "application/x-ndjson",
-    metadata: {
-      metadata: {
-        dateIST: dateIst,
-        windowLabel,
-        tickCount: String(ticks.length),
-      },
-    },
-  });
+  const storagePath = await trySaveStorageCopy(dateIst, ticks, windowLabel);
 
   const uploadedAt = new Date().toISOString();
   const state: MorningWsTickUploadState = {
@@ -140,16 +199,52 @@ export async function uploadMorningWsTicksForDate(dateIst: string): Promise<Morn
     windowLabel,
   };
 
-  await db.collection(FIRESTORE_COLLECTION).doc(dateIst).set({
-    ...state,
-    sourceFile: tickFilePath(dateIst),
-    previewTicks: ticks.slice(0, 25),
-    tailTicks: ticks.length > 25 ? ticks.slice(-10) : [],
-  });
+  await saveTicksInFirestore(dateIst, ticks, state);
 
   index.byDate[dateIst] = state;
   saveUploadIndex(index);
   return state;
+}
+
+/** Copy every on-disk morning window into Firestore. Safe to run again. */
+export async function backfillMorningWsTicksFromDisk(): Promise<MorningWsTickUploadState[]> {
+  if (!fs.existsSync(TICK_DIR)) return [];
+  const dates = fs
+    .readdirSync(TICK_DIR)
+    .map((name) => /^ws-ticks-(\d{4}-\d{2}-\d{2})\.jsonl$/.exec(name)?.[1] ?? "")
+    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
+    .sort();
+  const saved: MorningWsTickUploadState[] = [];
+  for (const dateIst of dates) {
+    saved.push(await uploadMorningWsTicksForDate(dateIst));
+  }
+  return saved;
+}
+
+export async function readArchivedMorningTickRows(dateIst: string): Promise<RawTickRow[] | null> {
+  const db = getAdminFirestore();
+  if (!db) return null;
+  const parent = db.collection(FIRESTORE_COLLECTION).doc(dateIst);
+  const snap = await parent.get();
+  if (!snap.exists) return null;
+  const data = snap.data() ?? {};
+  const parts: string[] = [];
+  if (typeof data.ticksJson === "string" && data.ticksJson.length > 0) {
+    parts.push(data.ticksJson);
+  } else if (typeof data.chunkCount === "number" && data.chunkCount > 0) {
+    const chunkSnap = await parent.collection("chunks").get();
+    const ordered = chunkSnap.docs.sort((a, b) => a.id.localeCompare(b.id));
+    for (const doc of ordered) {
+      const json = doc.data().ticksJson;
+      if (typeof json === "string") parts.push(json);
+    }
+  }
+  const rows: RawTickRow[] = [];
+  for (const part of parts) {
+    const parsed = JSON.parse(part) as RawTickRow[];
+    if (Array.isArray(parsed)) rows.push(...parsed);
+  }
+  return rows;
 }
 
 async function runScheduledUpload(reason: string): Promise<void> {

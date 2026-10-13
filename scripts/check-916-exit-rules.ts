@@ -22,12 +22,16 @@ import {
   isPast916GreenMinuteRetarget,
   is916MinuteGreenClose,
   is916MinuteAgainstLeg,
+  isBeyond91559CloseAgainstLeg,
   NINE_FIFTEEN_WS_CLOSE_59_SEC,
   NINE_SIXTEEN_WS_OPEN_00_SEC,
   NINE_SIXTEEN_HYBRID_INDEX_TARGET_GREEN_MINUTE,
   isTuesdayIst,
   getIndexExitScheduleLabel,
   getPnlExitScheduleLabel,
+  pnlPctOfEntryCost,
+  shouldExitCapitalStopLoss,
+  CAPITAL_STOP_LOSS_PCT,
 } from "../server/nine-sixteen-logic.js";
 
 // 2026-08-18 is a Tuesday, 2026-08-19 a Wednesday.
@@ -179,6 +183,26 @@ console.log("CE +12 hit", ok(shouldExitNineSixteen(ceTarget12, entrySpotHybrid, 
 console.log("CE +12 hold", ok(!shouldExitNineSixteen(ceTarget12 - 0.05, entrySpotHybrid, "CE_BUY", 12)));
 console.log("CE retarget when 9:16 closes red", ok(is916MinuteAgainstLeg(23_995, 24_000, "CE_BUY")));
 console.log("CE no retarget when 9:16 closes green", ok(!is916MinuteAgainstLeg(24_005, 24_000, "CE_BUY")));
+console.log(
+  "PE beyond 9:15:59 close",
+  ok(isBeyond91559CloseAgainstLeg(22_001, 22_000, "PE_BUY")),
+);
+console.log(
+  "PE equal to 9:15:59 close holds",
+  ok(!isBeyond91559CloseAgainstLeg(22_000, 22_000, "PE_BUY")),
+);
+console.log(
+  "PE still below 9:15:59 close holds",
+  ok(!isBeyond91559CloseAgainstLeg(21_999, 22_000, "PE_BUY")),
+);
+console.log(
+  "CE beyond 9:15:59 close",
+  ok(isBeyond91559CloseAgainstLeg(21_999, 22_000, "CE_BUY")),
+);
+console.log(
+  "CE equal to 9:15:59 close holds",
+  ok(!isBeyond91559CloseAgainstLeg(22_000, 22_000, "CE_BUY")),
+);
 console.log("PE retarget when 9:16 closes green", ok(is916MinuteAgainstLeg(24_005, 24_000, "PE_BUY")));
 console.log("PE no retarget when 9:16 closes red", ok(!is916MinuteAgainstLeg(23_995, 24_000, "PE_BUY")));
 
@@ -204,3 +228,12 @@ console.log(
   ok(shouldHybrid916ReturnToEntryExit(entrySpot, entrySpot, "PE_BUY")),
 );
 console.log("hybrid adverse pts", NINE_SIXTEEN_HYBRID_ADVERSE_STOP_PTS);
+
+console.log("\n--- capital stop −30% of deployed ---");
+console.log("pct", CAPITAL_STOP_LOSS_PCT);
+console.log("−30 exits", ok(shouldExitCapitalStopLoss(-30)));
+console.log("−30.01 exits", ok(shouldExitCapitalStopLoss(-30.01)));
+console.log("−29.99 holds", ok(!shouldExitCapitalStopLoss(-29.99)));
+console.log("profit holds", ok(!shouldExitCapitalStopLoss(10)));
+console.log("unknown holds", ok(!shouldExitCapitalStopLoss(null)));
+console.log("entry 100 × 65, price 70 → −30%", ok(pnlPctOfEntryCost((70 - 100) * 65, 100, 65) === -30));

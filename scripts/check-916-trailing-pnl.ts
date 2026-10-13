@@ -15,13 +15,13 @@ import {
 const entryPrice = 40;
 const quantity = 130;
 
-function checkWeekday(label: string, dateIst: string, expectedPct: number, leg?: "CE_BUY" | "PE_BUY") {
-  const pct = getNineSixteenTakeProfitPct(dateIst, leg);
+function checkWeekday(label: string, dateIst: string, expectedPct: number, sameColor: boolean) {
+  const pct = getNineSixteenTakeProfitPct(dateIst, sameColor);
   const limit = nineFifteenTakeProfitLimitPrice(entryPrice, pct);
   const aim = nineFifteenTakeProfitAmount(entryPrice, quantity, pct);
   console.log(`\n${label} (${dateIst})`);
   console.log(`  take-profit: +${pct}% (expected ${expectedPct}%)`);
-  console.log(`  ladder: ${getNineSixteenLadderLabel(dateIst, leg)}`);
+  console.log(`  ladder: ${getNineSixteenLadderLabel(dateIst, "PE_BUY", sameColor)}`);
   console.log(`  limit price: ₹${limit.toFixed(2)} per unit`);
   console.log(`  profit aim: ₹${Math.round(aim)} on ₹${Math.round(entryPrice * quantity)} deployed`);
   if (pct !== expectedPct) {
@@ -29,21 +29,20 @@ function checkWeekday(label: string, dateIst: string, expectedPct: number, leg?:
   }
 }
 
-checkWeekday("Monday", "2026-08-31", 5);
-checkWeekday("Tuesday", "2026-09-01", 7);
-checkWeekday("Wednesday", "2026-09-02", 5);
-checkWeekday("Thursday", "2026-09-03", 5);
-checkWeekday("Friday", "2026-09-04", 7);
-checkWeekday("Monday PE", "2026-08-31", 5, "PE_BUY");
-checkWeekday("Tuesday PE", "2026-09-01", 7, "PE_BUY");
-checkWeekday("Monday CE", "2026-08-31", 3, "CE_BUY");
-checkWeekday("Tuesday CE", "2026-09-01", 3, "CE_BUY");
-checkWeekday("Wednesday CE", "2026-09-02", 3, "CE_BUY");
-checkWeekday("Thursday CE", "2026-09-03", 3, "CE_BUY");
-checkWeekday("Friday CE", "2026-09-04", 3, "CE_BUY");
+checkWeekday("Wednesday same", "2026-09-02", 3, true);
+checkWeekday("Wednesday different", "2026-09-02", 2, false);
+checkWeekday("Thursday same", "2026-09-03", 6, true);
+checkWeekday("Thursday different", "2026-09-03", 4, false);
+checkWeekday("Friday same", "2026-09-04", 9, true);
+checkWeekday("Friday different", "2026-09-04", 6, false);
+checkWeekday("Monday same", "2026-08-31", 10, true);
+checkWeekday("Monday different", "2026-08-31", 7, false);
+checkWeekday("Tuesday same", "2026-09-01", 10, true);
+checkWeekday("Tuesday different", "2026-09-01", 8, false);
+checkWeekday("Tuesday same CE uses same %", "2026-09-01", 10, true);
 
 {
-  const pct = getNineSixteenTakeProfitPct("2026-09-01");
+  const pct = getNineSixteenTakeProfitPct("2026-09-01", true);
   const aim = nineFifteenTakeProfitAmount(entryPrice, quantity, pct);
   const atTarget = ownLegUnrealisedPnl(entryPrice, quantity, nineFifteenTakeProfitLimitPrice(entryPrice, pct));
   const below = atTarget != null ? atTarget - 1 : null;

@@ -564,11 +564,16 @@ export function LossTradesAccordion({
         <tbody>
           {trades.map((trade) => {
             const open916 = trade.entryAt?.indexPrice ?? null;
-            const exit = trade.adverseStopExit ?? trade.sessionEndExit ?? null;
+            const exit = trade.oppositeBodyExit ?? trade.adverseStopExit ?? trade.sessionEndExit ?? null;
             const exitNifty = exit?.indexPrice ?? null;
             const exitClock = exit?.timeIst.slice(0, 5) ?? "—";
             const diff = open916 != null && exitNifty != null ? exitNifty - open916 : null;
             const stopped = trade.adverseStopExit != null;
+            const exitNote = trade.oppositeBodyExit
+              ? " · 9:16 reversed the 9:15 body"
+              : !stopped && exit != null
+                ? " · no 40-pt stop"
+                : "";
             return (
               <tr key={trade.date}>
                 <td className="font-mono">{trade.date}</td>
@@ -579,7 +584,7 @@ export function LossTradesAccordion({
                   <span className="text-muted">
                     {" "}
                     {exitClock}
-                    {!stopped && exit != null ? " · no 40-pt stop" : ""}
+                    {exitNote}
                   </span>
                 </td>
                 <td className={cn("text-right font-mono", diff != null && diff > 0 ? "text-down" : diff != null && diff < 0 ? "text-up" : "")}>

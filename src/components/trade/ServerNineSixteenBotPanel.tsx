@@ -71,7 +71,9 @@ interface BotStatus {
   pnlTrailArmPct?: number;
   pnlTrailStepPct?: number;
   nineFifteenEnabled?: boolean;
-  tradeSlot?: "nine-fifteen" | "nine-sixteen";
+  fade1405Enabled?: boolean;
+  fade1405Settled?: boolean;
+  tradeSlot?: "nine-fifteen" | "nine-sixteen" | "fade-1405";
   nineFifteenMarkPrice?: number | null;
   nineFifteenMarkAt?: string | null;
   nineFifteenMarkChange?: number | null;
@@ -123,6 +125,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
   const [status, setStatus] = useState<BotStatus | null>(null);
   const [lastLiveAt, setLastLiveAt] = useState<string | null>(null);
   const [tickView, setTickView] = useState<"seconds" | "raw">("seconds");
+  const [fadeToggleBusy, setFadeToggleBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -172,6 +175,32 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
     return () => window.clearInterval(id);
   }, [inTrade, loadLive]);
 
+  const toggleFade1405 = useCallback(async () => {
+    if (fadeToggleBusy) return;
+    setFadeToggleBusy(true);
+    let nextEnabled = false;
+    setStatus((prev) => {
+      if (!prev) return prev;
+      nextEnabled = !prev.fade1405Enabled;
+      return { ...prev, fade1405Enabled: nextEnabled };
+    });
+    try {
+      const res = await fetch("/api/fade-1405/bot/toggle", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: nextEnabled }),
+      });
+      const json = await res.json();
+      if (res.ok && json.data) setStatus(json.data as BotStatus);
+      else void load();
+    } catch {
+      void load();
+    } finally {
+      setFadeToggleBusy(false);
+    }
+  }, [fadeToggleBusy, load]);
+
   if (!status) return null;
 
   const inPosition = status.phase === "in_position" || status.phase === "exiting";
@@ -202,7 +231,9 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
   const nineFifteenTpPct = status.nineFifteenTakeProfitPct ?? status.nineFifteenTrailArmPct ?? 3;
   const onNineFifteenLeg = status.tradeSlot === "nine-fifteen" && inPosition;
   const onNineSixteenLeg = status.tradeSlot === "nine-sixteen" && inPosition;
+  const onFade1405Leg = status.tradeSlot === "fade-1405" && inPosition;
   const onTpLimitLeg = onNineFifteenLeg || onNineSixteenLeg;
+
   const livePnlPct =
     status.pnlPct ??
     (livePnl != null && status.entryPrice != null && status.quantity != null && status.quantity > 0
@@ -306,7 +337,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
           <div>
             <h2 className="pat-title">Server 9:16 bot (Lightsail)</h2>
               <p className="pat-sub">
-                9:15 + 9:16 trading armed on server · websocket 9:00–16:00
+                9:15 + 9:16 morning · optional 14:05 fade · websocket 9:00–16:00
               </p>
           </div>
         </div>
@@ -318,6 +349,23 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
           <span className={cn("pat-badge", status.enabled ? "pat-badge--on" : "pat-badge--off")}>
             {status.enabled ? "9:16 armed" : "9:16 off"}
           </span>
+          <span
+            className={cn(
+              "pat-badge",
+              status.fade1405Enabled ? "pat-badge--on" : "pat-badge--off",
+            )}
+          >
+            {status.fade1405Enabled ? "14:05 fade armed" : "14:05 fade off"}
+          </span>
+          <label className="pat-toggle-label">
+            <input
+              type="checkbox"
+              checked={Boolean(status.fade1405Enabled)}
+              disabled={fadeToggleBusy}
+              onChange={() => void toggleFade1405()}
+            />
+            <span>14:05 fade</span>
+          </label>
         </div>
       </header>
 
@@ -325,6 +373,23 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
         <div className="ms-bot-warn ms-bot-warn--hold">
           <strong>9:16 entries are disabled on the server.</strong> Only the 9:15 trade runs — websocket tick
           capture and per-second samples stay active.
+        </div>
+      )}
+
+      {status.fade1405Enabled && (
+        <div className="ms-bot-warn ms-bot-warn--hold">
+          <strong>
+            {onFade1405Leg
+              ? "In the 14:05 fade trade."
+              : status.fade1405Settled
+                ? "14:05 fade settled for today."
+                : "14:05 fade armed for this afternoon."}
+          </strong>{" "}
+          {onFade1405Leg
+            ? "Exit on Nifty trail (25 / 5 / 4 / 10) or −30% capital stop — not the 9:16 index target."
+            : status.fade1405Settled
+              ? "No second 14:05 entry today."
+              : "After morning legs finish, watches 14:05 close for 100+ pts from 9:15 open and range vs yesterday."}
         </div>
       )}
 
@@ -401,7 +466,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                 ? `9:15 · trailing +${status.pnlTrailArmPct ?? 3}%→…`
                 : onNineSixteenLeg
                   ? `9:16 · +${nineFifteenTpPct}% limit`
-                  : "9:16 · PE +5% / +7% · CE +3% limit"}
+                  : "9:16 · weekday × same / different colour"}
             </span>
             <span className="pat-metric-hint">
               {onNineFifteenLeg ? (
@@ -413,6 +478,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                     ? ` · stop floor +${status.pnlLockedPct}%`
                     : ""}
                   . Hitting the target ratchets the ladder (does not exit); slip to the stop floor → market exit.
+                  <strong> Capital stop −30%</strong> of deployed capital on an option tick → market exit.{" "}
                   {status.pnlExitSchedule ? <> Schedule: {status.pnlExitSchedule}.</> : null}{" "}
                   <strong>9:15:57 flip</strong> — not in profit and Nifty ≥15 pts against vs 9:15 open → market exit
                   for 9:16 (|Δ| ≥ 15 on sealed 9:15 candle).{" "}
@@ -422,43 +488,42 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                 </>
               ) : onNineSixteenLeg ? (
                 <>
-                  Target is <strong>+{nineFifteenTpPct}% profit on capital deployed</strong> (
-                  {status.leg === "CE_BUY" ? (
-                    <>
-                      CE <strong>3%</strong> every day
-                    </>
-                  ) : (
-                    <>
-                      PE Mon/Wed/Thu <strong>5%</strong> · Tue/Fri <strong>7%</strong>
-                    </>
-                  )}
-                  ). On fill at 9:16:00 a resting{" "}
+                  Target is <strong>+{nineFifteenTpPct}% profit on capital deployed</strong> (same % for PE and CE).
+                  Same colour (9:16:00 open keeps the 9:15 colour) / different colour (gap): Wed <strong>3% / 2%</strong>{" "}
+                  · Thu <strong>6% / 4%</strong> · Fri <strong>9% / 6%</strong> · Mon <strong>10% / 7%</strong> · Tue{" "}
+                  <strong>10% / 8%</strong>. If a same-colour entry later trades beyond the <strong>9:15:59 close</strong>{" "}
+                  against the leg — any Nifty tick after the 9:16:00 entry — the limit is replaced at the
+                  different-colour % and the Nifty aim moves from <strong>12 to 8</strong>. On fill at 9:16:00 a resting{" "}
                   <strong>limit sell</strong> is placed; retries instantly if Kite rejects
                   {status.nineFifteenTpLimitPrice != null
                     ? ` (limit ₹${formatNumber(status.nineFifteenTpLimitPrice, 2)} per unit today)`
                     : ""}
-                  . <strong>Market backup</strong> at the same % if price prints before the limit fills.
+                  . <strong>Market backup</strong> at the same % if price prints before the limit fills.{" "}
+                  <strong>Capital stop −30%</strong> of deployed capital on an option tick → market sell.{" "}
                   {status.leg === "CE_BUY" ? (
                     <>
-                      Parallel <strong>flat +12/+8/+6 Nifty index exit</strong> (+12 or +8 until 9:17:00; if the 9:16
-                      minute closes red, retarget to <strong>+6 from 9:17:00</strong>)
+                      Parallel <strong>CE index exit</strong>: +12 or +8 until 9:17, then the aim is the{" "}
+                      <strong>Nifty entry spot only</strong>
                     </>
                   ) : (
                     <>
-                      Parallel <strong>flat −12/−8/−6 Nifty index exit</strong> (−12 or −8 until 9:17:00; if the 9:16
-                      minute closes green, retarget to <strong>−6 from 9:17:00</strong>)
+                      Parallel <strong>flat −12/−8 Nifty index exit</strong> (−12 stays until Nifty trades above the
+                      9:15:59 close, including right after entry, then <strong>−8</strong> and the limit switches to
+                      the different-colour %; a green-gap open is −8, then <strong>−6 from 9:17:00</strong> if that
+                      minute closes green)
                     </>
                   )}{" "}
                   runs alongside — <strong>first wins</strong>. <strong>3:25 PM</strong> square-off.
                 </>
               ) : (
                 <>
-                  9:16 take-profit on <strong>capital deployed</strong>: PE Mon/Wed/Thu <strong>+5%</strong> · Tue/Fri{" "}
-                  <strong>+7%</strong> · CE <strong>+3%</strong> every day — resting limit sell with instant retries;
-                  market backup at the same %;
-                  parallel index exit — PE: flat <strong>−12</strong> (both red) / <strong>−8</strong> (green gap),{" "}
-                  <strong>−6</strong> from 9:17:00 if the 9:16 minute closes green · CE: flat <strong>+12</strong> (both
-                  green) / <strong>+8</strong> (red gap), <strong>+6</strong> from 9:17:00 if the 9:16 minute closes red.{" "}
+                  9:16 take-profit on <strong>capital deployed</strong> (PE and CE): same colour / different colour — Wed{" "}
+                  <strong>3% / 2%</strong> · Thu <strong>6% / 4%</strong> · Fri <strong>9% / 6%</strong> · Mon{" "}
+                  <strong>10% / 7%</strong> · Tue <strong>10% / 8%</strong> — resting limit sell with instant retries;
+                  market backup at the same %; <strong>capital stop −30%</strong> of deployed capital;
+                  parallel index exit — PE: <strong>−12</strong> until Nifty trades above the <strong>9:15:59 close</strong>{" "}
+                  (any tick after entry), then <strong>−8</strong> · CE: +12/+8 until 9:17, then the aim is the{" "}
+                  <strong>entry spot only</strong>.{" "}
                   <strong>3:25 PM</strong> square-off.
                 </>
               )}
@@ -524,6 +589,14 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
         <span className={cn("pat-badge", status.enabled ? "pat-badge--on" : "pat-badge--off")}>
           {status.enabled ? "9:16 armed" : "9:16 off"}
         </span>
+        <span
+          className={cn(
+            "pat-badge",
+            status.fade1405Enabled ? "pat-badge--on" : "pat-badge--off",
+          )}
+        >
+          {status.fade1405Enabled ? "14:05 armed" : "14:05 off"}
+        </span>
         <span className={cn("pat-badge", status.wsConnected ? "pat-badge--open" : "pat-badge--off")}>
           {status.wsConnected ? "Websocket live" : "Websocket off"}
         </span>
@@ -578,7 +651,9 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
               ? "Live P&L · 9:15 leg (until exit)"
               : onNineSixteenLeg
                 ? "Live P&L · 9:16 leg (until exit)"
-                : "Live P&L (Zerodha)"}
+                : onFade1405Leg
+                  ? "Live P&L · 14:05 fade (Nifty trail exit)"
+                  : "Live P&L (Zerodha)"}
           </div>
           <div className={cn("pat-pnl-value", livePnl != null && getChangeClass(livePnl))}>
             {livePnl != null ? formatCurrency(livePnl) : "Syncing…"}
@@ -702,7 +777,9 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                     {livePnlPct != null ? ` · now ${livePnlPct >= 0 ? "+" : ""}${formatNumber(livePnlPct, 2)}%` : ""}
                   </>
                 ) : (
-                  <>PE Mon/Wed/Thu +5% · Tue/Fri +7% · CE +3% on capital deployed</>
+                  <>
+                    PE and CE · same / different colour — Wed 3/2 · Thu 6/4 · Fri 9/6 · Mon 10/7 · Tue 10/8
+                  </>
                 )}
               </span>
             </div>
@@ -956,12 +1033,16 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
         <strong>9:16 trade</strong> (armed on server): 9:15 WS close − open = Δ · flat or |Δ| &lt; 15 → skip ·{" "}
         <strong>|Δ| ≥ 15</strong> → red buys ATM PE, green buys ATM CE · <strong>NRML market BUY</strong> @{" "}
         <strong>9:16:00</strong> first WS tick (CE + PE WS from 9:15:58 · sized on latest WS price + 3% cushion · retries until{" "}
-        <strong>9:16:30</strong>). Skipped if the 9:15 leg is still open at 9:16:00. Exit: limit sell{" "}
-        PE <strong>+5% Mon/Wed/Thu</strong> · <strong>+7% Tue/Fri</strong> · CE <strong>+3% every day</strong> on
-        capital deployed; market backup;{" "}
-        parallel flat <strong>−12</strong> / <strong>−8</strong> (PE) or <strong>+12</strong> / <strong>+8</strong> (CE)
-        until 9:17:00; if the 9:16 minute closes against the leg, retarget to <strong>−6</strong> / <strong>+6</strong>{" "}
-        from 9:17:00 — Nifty index exit via <strong>market sell</strong> (first wins vs TP limit);{" "}
+        <strong>9:16:30</strong>). Skipped if the 9:15 leg is still open at 9:16:00, and skipped for the whole
+        day when the 9:15 signal qualifies and that order is not filled. Exit: limit sell{" "}
+        same % for PE and CE by weekday and 9:16 colour (same / different: Wed <strong>3% / 2%</strong> · Thu{" "}
+        <strong>6% / 4%</strong> · Fri <strong>9% / 6%</strong> · Mon <strong>10% / 7%</strong> · Tue{" "}
+        <strong>10% / 8%</strong>) on capital deployed; market backup;{" "}
+        PE <strong>−12</strong> until Nifty trades above the <strong>9:15:59 close</strong> (any tick after the
+        9:16:00 entry), then <strong>−8</strong> and the limit switches to the different-colour %. CE uses +12/+8 only
+        until 9:17, then the
+        aim is the <strong>entry spot only</strong> — Nifty index exit via <strong>market sell</strong> (first wins vs
+        TP limit);{" "}
         <strong>3:25 PM</strong> square-off.
         {lastLiveAt && inPosition && (
           <> Last tick {getIndianMarketContext(new Date(lastLiveAt)).timeIST} IST.</>

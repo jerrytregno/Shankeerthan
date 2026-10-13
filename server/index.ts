@@ -1,8 +1,6 @@
 import "./load-env.js";
 import app, { warmBacktestCaches } from "./app.js";
 import { startNineSixteenBot, startNineSixteenLiveMonitor } from "./nine-sixteen-bot.js";
-import { startMomentumScalperBot, startMomentumScalperLiveMonitor } from "./momentum-scalper-bot.js";
-import { formatMomentumLiveScheduleLabel, isTrapsBotHardDisabled } from "./momentum-scalper-logic.js";
 import { startBrokerReconcileLoop } from "./broker-trades.js";
 import {
   getEgressRelayUrl,
@@ -56,21 +54,11 @@ app.listen(PORT, async () => {
   }
 
   startNineSixteenLiveMonitor();
-  startMomentumScalperLiveMonitor();
 
   startNineSixteenBot();
   console.log("[nine-sixteen-bot] 9:15 + 9:16 trading armed on server");
 
   startMorningWsTickFirebaseArchive();
-
-  // Main loop runs on startup so Traps can scan when armed from the UI.
-  if (isTrapsBotHardDisabled()) {
-    console.log("[traps] Hard-disabled on server (MOMENTUM_SCALPER_BOT_ENABLED=0)");
-  } else {
-    const trapsSchedule = formatMomentumLiveScheduleLabel();
-    console.log(`[traps] Weekday schedule ${trapsSchedule} IST · open trades are not cut at window end`);
-  }
-  startMomentumScalperBot();
 
   // Zerodha's tradebook is same-day only, so fills are snapshotted through the session rather than
   // waiting for someone to open the Trades page.

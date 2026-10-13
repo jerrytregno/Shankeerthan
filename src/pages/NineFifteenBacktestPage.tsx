@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, RefreshCw, TrendingDown } from "lucide-react";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { BacktestSection } from "@/components/nine-fifteen/HighMinus5BacktestSection";
+import { NineFifteenMinuteTickChart } from "@/components/nine-fifteen/NineFifteenMinuteTickChart";
 import { FullDayBacktestSection } from "@/components/nine-fifteen/FullDayBacktestSection";
 import { SmallGreenPre10RallySection } from "@/components/nine-fifteen/SmallGreenPre10RallySection";
 import { SmallRedPre10SelloffSection } from "@/components/nine-fifteen/SmallRedPre10SelloffSection";
@@ -101,6 +102,8 @@ export default function NineFifteenBacktestPage() {
             </button>
           </div>
         </header>
+
+        <NineFifteenMinuteTickChart />
 
         {!connected && (
           <div className="card nf915bt-error">

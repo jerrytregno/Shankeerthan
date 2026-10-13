@@ -1262,6 +1262,16 @@ function buildRowsFromMinuteMap(
     const checkpoints = buildCheckpointSnapshots(bar915.open, sessionCandles, points);
     const bar916 = sessionCandles.find((c) => c.mins === SESSION_ENTRY_MINUTES);
     const bar1000 = sessionCandles.find((c) => c.mins === 10 * 60);
+    const bar917 = sessionCandles.find((c) => c.mins === SESSION_ENTRY_MINUTES + 1);
+    const change916Body = bar916 ? bar916.close - bar916.open : 0;
+    const oppositeBody917Exit =
+      bar917 &&
+      change !== 0 &&
+      change916Body !== 0 &&
+      Math.sign(change916Body) !== Math.sign(change) &&
+      Math.abs(change916Body) + 1e-9 >= Math.abs(change)
+        ? { timeIst: "09:17:00", indexPrice: bar917.open }
+        : null;
     const entryAtLive916 = bar916 ? kiteEntryAt916Open(bar916) : null;
     const entryPx = entryAtLive916?.indexPrice ?? bar915.open;
     const hit25 = firstTargetHitsFromKite(entryPx, sessionCandles, points.backtestTarget25);
@@ -1526,6 +1536,7 @@ function buildRowsFromMinuteMap(
       indexClose1530: sessionDayClosePx(sessionCandles),
       peReturnToEntryFrom926: firstReturnToEntryTime(entryPx, sessionCandles, 9 * 60 + 26, "PE"),
       ceReturnToEntryFrom917: firstReturnToEntryTime(entryPx, sessionCandles, 9 * 60 + 17, "CE"),
+      oppositeBody917Exit,
       breakoutStopHit,
       breakoutTuesdayTargetHit,
       breakoutStopPoints,
@@ -3512,8 +3523,23 @@ function hybrid916Outcome(
   targetHit: NineFifteenTargetHit | null;
   returnAt: string | null;
   targetAfterDeadline: boolean;
+  oppositeExit: { timeIst: string; indexPrice: number } | null;
 } {
   const targetHit = hybrid916TargetHit(row, gapTargetPoints, points, side);
+  const targetIn916 = targetHit != null && minutesFromIstTime(targetHit.timeIst) < SESSION_ENTRY_MINUTES + 1;
+  const entryPx = entryIndexPrice(row);
+  if (row.oppositeBody917Exit && !targetIn916 && entryPx != null) {
+    const exitPx = row.oppositeBody917Exit.indexPrice;
+    const win = side === "CE" ? exitPx > entryPx : exitPx < entryPx;
+    return {
+      win,
+      stopped: false,
+      targetHit: null,
+      returnAt: null,
+      targetAfterDeadline: false,
+      oppositeExit: row.oppositeBody917Exit,
+    };
+  }
   const stopped = hybrid916AdverseStopFired(row, side, targetHit);
   const deadline = side === "CE" ? HYBRID916_GREEN_STOP_MINUTE : HYBRID916_RED_STOP_MINUTE;
   const targetInTime = targetHit != null && minutesFromIstTime(targetHit.timeIst) <= deadline;
@@ -3524,7 +3550,7 @@ function hybrid916Outcome(
     minutesFromIstTime(targetHit.timeIst) > deadline;
   const win =
     (targetInTime && !stopped) || (!stopped && returnAt != null) || targetAfterDeadline;
-  return { win, stopped, targetHit, returnAt, targetAfterDeadline };
+  return { win, stopped, targetHit, returnAt, targetAfterDeadline, oppositeExit: null };
 }
 
 function hybrid916Hit(
@@ -3667,7 +3693,9 @@ function hybrid916CheckpointHit(
   const deadline = side === "CE" ? HYBRID916_GREEN_STOP_MINUTE : HYBRID916_RED_STOP_MINUTE;
   const targetInTime =
     outcome.targetHit != null && minutesFromIstTime(outcome.targetHit.timeIst) <= deadline;
-  const hit = targetInTime
+  const hit = outcome.oppositeExit
+    ? { ...outcome.oppositeExit, levelLabel: "9:17 open" }
+    : targetInTime
     ? outcome.targetHit
     : outcome.returnAt
       ? {
@@ -3693,7 +3721,9 @@ function buildHybrid916TradeDayDetail(
     outcome.targetHit != null && minutesFromIstTime(outcome.targetHit.timeIst) <= deadline;
   let shownHit: NineFifteenTargetHit | null = null;
   if (outcome.win) {
-    if (targetInTime && outcome.targetHit) {
+    if (outcome.oppositeExit) {
+      shownHit = { ...outcome.oppositeExit, levelLabel: "9:17 open (opposite body)" };
+    } else if (targetInTime && outcome.targetHit) {
       shownHit = outcome.targetHit;
     } else if (outcome.targetAfterDeadline && outcome.targetHit) {
       shownHit = outcome.targetHit;
@@ -3719,9 +3749,10 @@ function buildHybrid916TradeDayDetail(
       ? ((side === "CE" ? row.ceAdverseStopTouch : row.peAdverseStopTouch) ?? null)
       : null,
     sessionEndExit:
-      !outcome.win && !outcome.stopped && row.indexClose1530 != null
+      !outcome.win && !outcome.stopped && !outcome.oppositeExit && row.indexClose1530 != null
         ? { timeIst: "15:30:00", indexPrice: row.indexClose1530 }
         : null,
+    oppositeBodyExit: outcome.oppositeExit,
   };
 }
 
@@ -3747,7 +3778,7 @@ function buildHybrid916FollowStats(
       const detail = buildHybrid916TradeDayDetail(row, points, gapTargetPoints, side);
       const rawHit = hybrid916TargetHit(row, gapTargetPoints, points, side);
       if (hybrid916AdverseStopFired(row, side, rawHit)) return detail;
-      if (!byDate || detail.winConfirmed) return detail;
+      if (!byDate || detail.winConfirmed || detail.oppositeBodyExit) return detail;
       const targetPoints = detail.targetPoints ?? points.backtestTarget15;
       const nrmlCarry = computeNrmlCarryOutcome(row, targetPoints, byDate, profile, side);
       return nrmlCarry ? { ...detail, nrmlCarry } : detail;
@@ -4191,7 +4222,7 @@ export function buildTuesdayTenPointStats(
 
 /** Bump when the shape or maths of the result changes — invalidates the on-disk payload. */
 const CACHE_VERSION =
-  "v144:916-return-to-entry-win";
+  "v145:916-opposite-body-917-exit";
 /**
  * Completed sessions never change, so the only thing a rebuild adds is today's session. A short
  * TTL just meant a 4–6 minute rebuild every half hour, which pegs this 2 GB host and slows down

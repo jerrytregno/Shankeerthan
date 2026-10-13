@@ -26,20 +26,22 @@ import {
   listBotTradeLogs,
   setNineFifteenBotEnabled,
   setNineSixteenBotEnabled,
+  setFade1405Enabled,
 } from "./nine-sixteen-bot.js";
+import { ensureFade1405Backtest } from "./fade-1405-backtest.js";
 import {
   ensureHighMinus5Backtest,
   NINE_FIFTEEN_HIGH_MINUS5_DEFAULT_DAYS,
 } from "./nine-fifteen-high-minus5-backtest.js";
+import {
+  isNineFifteenMinuteDateKey,
+  listNineFifteenMinuteTickDates,
+  loadNineFifteenMinuteTicks,
+} from "./nine-fifteen-minute-ticks.js";
 import { ensureNiftyOneHourBacktest, NIFTY_ONE_HOUR_DEFAULT_DAYS } from "./nifty-one-hour-backtest.js";
 import { ensureNiftyRsiBacktest, NIFTY_RSI_DEFAULT_DAYS } from "./nifty-rsi-backtest.js";
 import { ensureNiftyRsiSpeedBacktest, NIFTY_RSI_SPEED_DEFAULT_DAYS } from "./nifty-rsi-speed-backtest.js";
-import {
-  getMomentumScalperBotStatus,
-  getMomentumScalperBotStatusLive,
-  reconcileMomentumScalperBrokerPosition,
-  setMomentumScalperBotEnabled,
-} from "./momentum-scalper-bot.js";
+import { ensureWinBacktest } from "./win-backtest.js";
 import {
   listSnapshotDates,
   loadBrokerFillsSnapshot,
@@ -95,23 +97,6 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-
-/** Backtest studies withheld from the shipped app; their pages are not routed in the client either. */
-const DISABLED_API_PATHS = new Set([
-  "/api/kite/nine-fifteen-candles",
-  "/api/kite/index-session-minutes",
-  "/api/kite/nine-fifteen-high-minus5-backtest",
-  "/api/kite/nifty-one-hour-backtest",
-  "/api/kite/nifty-rsi-speed-backtest",
-  "/api/kite/nifty-rsi-backtest",
-]);
-
-app.use((req, res, next) => {
-  if (DISABLED_API_PATHS.has(req.path.toLowerCase().replace(/\/+$/, ""))) {
-    return res.status(404).json({ error: "Not found" });
-  }
-  next();
-});
 
 function getKiteConfig(req?: express.Request) {
   const apiKey = process.env.KITE_API_KEY;
@@ -568,6 +553,30 @@ app.get("/api/kite/index-session-minutes", async (req, res) => {
   }
 });
 
+app.get("/api/nine-fifteen/ws-minute-ticks/dates", async (_req, res) => {
+  try {
+    const dates = await listNineFifteenMinuteTickDates();
+    return res.json({ dates });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to list 9:15 minute ticks";
+    return res.status(500).json({ error: message });
+  }
+});
+
+app.get("/api/nine-fifteen/ws-minute-ticks", async (req, res) => {
+  const date = String(req.query.date ?? "");
+  if (!isNineFifteenMinuteDateKey(date)) {
+    return res.status(400).json({ error: "date must be YYYY-MM-DD" });
+  }
+  try {
+    const data = await loadNineFifteenMinuteTicks(date);
+    return res.json({ data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to load 9:15 minute ticks";
+    return res.status(500).json({ error: message });
+  }
+});
+
 app.get("/api/kite/nine-fifteen-high-minus5-backtest", async (req, res) => {
   const accessToken = req.cookies[TOKEN_COOKIE];
   if (!accessToken) return res.status(401).json({ error: "Not connected to Zerodha" });
@@ -621,6 +630,34 @@ app.get("/api/kite/nifty-rsi-speed-backtest", async (req, res) => {
     return res.json({ data, cached, builtAt });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to build RSI Speed-O-Meter backtest";
+    return res.status(502).json({ error: message });
+  }
+});
+
+app.get("/api/kite/fade-1405-backtest", async (req, res) => {
+  const accessToken = req.cookies[TOKEN_COOKIE];
+  if (!accessToken) return res.status(401).json({ error: "Not connected to Zerodha" });
+
+  const force = req.query.refresh === "1";
+  try {
+    const { data, cached } = await ensureFade1405Backtest(accessToken, force);
+    return res.json({ data, cached });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to build 14:05 fade backtest";
+    return res.status(502).json({ error: message });
+  }
+});
+
+app.get("/api/kite/win-backtest", async (req, res) => {
+  const accessToken = req.cookies[TOKEN_COOKIE];
+  if (!accessToken) return res.status(401).json({ error: "Not connected to Zerodha" });
+
+  const force = req.query.refresh === "1";
+  try {
+    const { data, cached, builtAt } = await ensureWinBacktest(accessToken, force);
+    return res.json({ data, cached, builtAt });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to build win backtest";
     return res.status(502).json({ error: message });
   }
 });
@@ -926,8 +963,8 @@ app.post("/api/nine-sixteen/bot/toggle", async (req, res) => {
   }
 });
 
-app.post("/api/nine-fifteen/bot/toggle", async (req, res) => {
-  setNineFifteenBotEnabled(req.body?.enabled === true);
+app.post("/api/fade-1405/bot/toggle", async (req, res) => {
+  setFade1405Enabled(req.body?.enabled === true);
   try {
     const data = await getNineSixteenBotStatusLive();
     return res.json({ data });
@@ -936,35 +973,13 @@ app.post("/api/nine-fifteen/bot/toggle", async (req, res) => {
   }
 });
 
-app.get("/api/momentum-scalper/bot/status", async (_req, res) => {
+app.post("/api/nine-fifteen/bot/toggle", async (req, res) => {
+  setNineFifteenBotEnabled(req.body?.enabled === true);
   try {
-    const data = await getMomentumScalperBotStatusLive();
-    return res.json({ data });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to load Traps status";
-    return res.status(500).json({ error: message });
-  }
-});
-
-app.post("/api/momentum-scalper/bot/toggle", async (req, res) => {
-  // Strict `true` only. `Boolean()` would arm the bot on a stray "false" string or any truthy
-  // value, and arming is the direction that costs money.
-  setMomentumScalperBotEnabled(req.body?.enabled === true);
-  try {
-    const data = await getMomentumScalperBotStatusLive();
+    const data = await getNineSixteenBotStatusLive();
     return res.json({ data });
   } catch {
-    return res.json({ data: getMomentumScalperBotStatus() });
-  }
-});
-
-app.post("/api/momentum-scalper/bot/reconcile", async (_req, res) => {
-  try {
-    const data = await reconcileMomentumScalperBrokerPosition();
-    return res.json({ data });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to reconcile with Zerodha";
-    return res.status(400).json({ error: message });
+    return res.json({ data: getNineSixteenBotStatus() });
   }
 });
 

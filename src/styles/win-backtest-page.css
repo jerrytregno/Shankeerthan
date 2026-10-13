@@ -1,0 +1,185 @@
+.winbt-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding-bottom: 2rem;
+}
+
+.winbt-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.winbt-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0 0 0.35rem;
+}
+
+.winbt-subtitle {
+  margin: 0;
+  max-width: 52rem;
+  color: var(--text-muted, #94a3b8);
+  line-height: 1.5;
+}
+
+.winbt-error,
+.winbt-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--text-muted, #94a3b8);
+}
+
+.winbt-methods {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.75rem;
+}
+
+.winbt-method {
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: transparent;
+  color: inherit;
+  border-radius: 0.75rem;
+  padding: 0.85rem 0.9rem;
+  cursor: pointer;
+}
+
+.winbt-method.active {
+  border-color: #38bdf8;
+}
+
+.winbt-method-label {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.winbt-method-points {
+  margin: 0.35rem 0 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.winbt-method-meta {
+  margin: 0.2rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-muted, #94a3b8);
+  line-height: 1.4;
+}
+
+.winbt-detail {
+  margin: 0 0 0.85rem;
+  line-height: 1.5;
+}
+
+.winbt-trail {
+  margin: 0 0 1rem;
+  line-height: 1.5;
+}
+
+.winbt-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.75rem;
+}
+
+.winbt-stat-label {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-muted, #94a3b8);
+}
+
+.winbt-stat-value {
+  margin: 0.15rem 0 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.winbt-up {
+  color: #4ade80;
+}
+
+.winbt-down {
+  color: #f87171;
+}
+
+.winbt-table-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.winbt-table-toolbar h2,
+.winbt-section h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.winbt-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.winbt-table-wrap {
+  overflow-x: auto;
+}
+
+.winbt-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.winbt-table th,
+.winbt-table td {
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+  white-space: nowrap;
+}
+
+.winbt-table th {
+  font-weight: 600;
+  color: var(--text-muted, #94a3b8);
+}
+
+.winbt-empty {
+  text-align: center;
+  color: var(--text-muted, #94a3b8);
+  padding: 1.5rem !important;
+}
+
+.winbt-side {
+  display: inline-block;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.winbt-side-call {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+
+.winbt-side-put {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+.winbt-candidates {
+  margin-top: 1rem;
+}

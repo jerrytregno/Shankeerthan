@@ -831,7 +831,9 @@ function Hybrid916BacktestSection({
             profit is a flat <strong>{v.sign}{sc(flatGap)} Nifty points</strong> from entry. Adverse stop replaces
             the 10:00 ±30 exit: <strong>red at 9:26 if 40 pts against</strong>,{" "}
             <strong>green at 9:17 if 40 pts against</strong>, and only when the target has not hit yet. A target
-            touch on that same minute still counts as a win.
+            touch on that same minute still counts as a win. <strong>9:17 opposite-body exit:</strong> if the 9:16
+            body points the other way and is at least as big as the 9:15 body (and the target did not hit inside
+            9:16), the trade closes at the 9:17 open — a win only if that open is in profit.
           </>
         ) : (
           <>

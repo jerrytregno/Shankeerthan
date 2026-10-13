@@ -2765,72 +2765,24 @@ export async function getMomentumScalperBotStatusLive(): Promise<MomentumScalper
   return buildStatus();
 }
 
-export function setMomentumScalperBotEnabled(next: boolean) {
-  const ctx = getIndianMarketContext();
-  if (next && isTrapsBotHardDisabled()) {
-    pushLog("Cannot enable — Traps is disabled on the server (MOMENTUM_SCALPER_BOT_ENABLED=0)", "warning");
-    return;
+export function setMomentumScalperBotEnabled(_next: boolean) {
+  enabled = false;
+  phase = "off";
+  message = "Traps removed";
+  if (timer) clearTimeout(timer);
+  timer = null;
+  if (tickerStop) {
+    tickerStop();
+    tickerStop = null;
   }
-  if (next && sessionAlreadyDone(ctx.dateIST)) {
-    const detail = sessionStoppedForLoss(ctx.dateIST)
-      ? `today's session ended after ${MOMENTUM_SCALPER_MAX_LOSSES_PER_DAY} losses`
-      : "today's session is finished";
-    pushLog(`Cannot enable — ${detail}`, "warning");
-    return;
-  }
-  enabled = next;
-  if (!enabled) {
-    // Keep the loop and the ticker alive if a leg is open: the P&L ladder needs option ticks, and
-    // tearing them down here would strand the position until the broker squares it off.
-    if (isHoldingPosition()) {
-      message = "Disabled — seeing the open position out, no new entries";
-      pushLog(message, "warning");
-      scheduleNext(0);
-      return;
-    }
-    if (timer) clearTimeout(timer);
-    timer = null;
-    if (tickerStop) {
-      tickerStop();
-      tickerStop = null;
-    }
-    phase = "off";
-    message = DISABLED_MESSAGE;
-    pushLog("Traps disabled", "info");
-    return;
-  }
-  phase = "waiting";
-  message = "Traps enabled — scanning after 9:16:30 through entry cutoff";
-  pushLog("Traps enabled", "info");
-  const session = loadKiteSession();
-  if (session?.accessToken) void refreshRsiFromKite(session.accessToken, ctx.dateIST, true);
-  scheduleNext(0);
 }
 
 export function startMomentumScalperBot() {
-  const ctx = getIndianMarketContext();
-  loadStateOnce(ctx.dateIST);
-  loadEntryClaim(ctx.dateIST);
-  if (isTrapsBotHardDisabled()) {
-    enabled = false;
-    phase = isHoldingPosition() ? phase : "off";
-    message = isHoldingPosition()
-      ? "Disabled on server — seeing the open position out, no new entries"
-      : SERVER_DISABLED_MESSAGE;
-    if (isHoldingPosition()) {
-      pushLog(message, "warning");
-    }
-  } else if (isHoldingPosition()) {
-    pushLog("Recovered an open position on startup — managing it out", "warning");
-  } else {
-    enabled = false;
-    phase = "off";
-    message = DISABLED_MESSAGE;
-  }
-  scheduleNext(0);
+  enabled = false;
+  phase = "off";
+  message = "Traps removed";
 }
 
 export function startMomentumScalperLiveMonitor() {
-  const ctx = getIndianMarketContext();
-  loadStateOnce(ctx.dateIST);
+  /* Traps is removed. */
 }

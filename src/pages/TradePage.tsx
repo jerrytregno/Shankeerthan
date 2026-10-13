@@ -589,7 +589,7 @@ export default function TradePage() {
         {error && <p className="trade-page-error text-down">{error}</p>}
 
         <div className="trade-filter-row">
-          {(["all", "nine-sixteen", "momentum-scalper"] as SourceFilter[]).map((key) => (
+          {(["all", "nine-sixteen"] as SourceFilter[]).map((key) => (
             <button
               key={key}
               type="button"
@@ -670,7 +670,7 @@ export default function TradePage() {
                 <>
                   <p>No trade logs yet.</p>
                   <p className="text-muted text-sm">
-                    Completed 9:16 and Traps trades appear here after sync, each stamped
+                    Completed 9:16 trades appear here after sync, each stamped
                     with the fills Zerodha actually executed. Enable Firestore in Firebase Console if
                     sync fails.
                   </p>

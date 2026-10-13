@@ -1,0 +1,342 @@
+{
+  "trades": [
+    {
+      "id": "2026-10-09-session-nine-sixteen-error",
+      "source": "nine-sixteen",
+      "dateIST": "2026-10-09",
+      "status": "error",
+      "leg": null,
+      "tradingsymbol": null,
+      "quantity": null,
+      "open915": null,
+      "close915": null,
+      "change915": null,
+      "entrySpot": null,
+      "targetSpot": null,
+      "entryPrice": null,
+      "exitPrice": null,
+      "exitSpot": null,
+      "pnl": null,
+      "exitReason": null,
+      "message": "Off-whitelist IP detected (171.79.62.165) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+      "logs": [
+        {
+          "time": "15:15:36",
+          "message": "Off-whitelist IP detected (171.79.62.165) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "error"
+        },
+        {
+          "time": "15:15:34",
+          "message": "9:15 + 9:16 trading armed on startup — 9:15: red ≥ 5 pts → PE · green ≥ 10 pts → CE at 9:15:11 · 9:16: |Δ| ≥ 15 · red → PE · green → CE at 9:16:01",
+          "type": "info"
+        }
+      ],
+      "createdAt": "2026-10-09T09:45:36.479Z",
+      "closedAt": "2026-10-09T09:45:36.479Z"
+    },
+    {
+      "id": "2026-09-17-session-nine-sixteen-error",
+      "source": "nine-sixteen",
+      "dateIST": "2026-09-17",
+      "status": "error",
+      "leg": null,
+      "tradingsymbol": null,
+      "quantity": null,
+      "open915": null,
+      "close915": null,
+      "change915": null,
+      "entrySpot": null,
+      "targetSpot": null,
+      "entryPrice": null,
+      "exitPrice": null,
+      "exitSpot": null,
+      "pnl": null,
+      "exitReason": null,
+      "message": "Off-whitelist IP detected (110.224.81.66) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+      "logs": [
+        {
+          "time": "14:54:25",
+          "message": "Off-whitelist IP detected (110.224.81.66) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "error"
+        },
+        {
+          "time": "14:54:23",
+          "message": "9:15 + 9:16 trading armed on startup — 9:15: red/green ≥ 5 pts → PE/CE at 9:15:11 · 9:16: red |Δ| ≥ 15 → PE at 9:16:01",
+          "type": "info"
+        }
+      ],
+      "createdAt": "2026-09-17T09:24:25.100Z",
+      "closedAt": "2026-09-17T09:24:25.100Z"
+    },
+    {
+      "id": "2026-09-15-session-nine-sixteen-error",
+      "source": "nine-sixteen",
+      "dateIST": "2026-09-15",
+      "status": "error",
+      "leg": null,
+      "tradingsymbol": null,
+      "quantity": null,
+      "open915": null,
+      "close915": null,
+      "change915": null,
+      "entrySpot": null,
+      "targetSpot": null,
+      "entryPrice": null,
+      "exitPrice": null,
+      "exitSpot": null,
+      "pnl": null,
+      "exitReason": null,
+      "message": "Off-whitelist IP detected (175.184.252.162, 118.95.165.238) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+      "logs": [
+        {
+          "time": "13:36:44",
+          "message": "Off-whitelist IP detected (175.184.252.162, 118.95.165.238) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "error"
+        },
+        {
+          "time": "13:36:43",
+          "message": "9:15 + 9:16 trading armed on startup — 9:15: red/green ≥ 5 pts → PE/CE at 9:15:11 · 9:16: red |Δ| ≥ 15 → PE at 9:16:01",
+          "type": "info"
+        }
+      ],
+      "createdAt": "2026-09-15T08:06:44.275Z",
+      "closedAt": "2026-09-15T08:06:44.275Z"
+    },
+    {
+      "id": "2026-09-01-session-nine-sixteen-error",
+      "source": "nine-sixteen",
+      "dateIST": "2026-09-01",
+      "status": "error",
+      "leg": null,
+      "tradingsymbol": null,
+      "quantity": null,
+      "open915": null,
+      "close915": null,
+      "change915": null,
+      "entrySpot": null,
+      "targetSpot": null,
+      "entryPrice": null,
+      "exitPrice": null,
+      "exitSpot": null,
+      "pnl": null,
+      "exitReason": null,
+      "message": "Off-whitelist IP detected (106.195.43.80) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+      "logs": [
+        {
+          "time": "13:51:55",
+          "message": "Off-whitelist IP detected (106.195.43.80) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "error"
+        },
+        {
+          "time": "13:51:53",
+          "message": "9:15 and 9:16 trading enabled on startup",
+          "type": "info"
+        }
+      ],
+      "createdAt": "2026-09-01T08:21:55.058Z",
+      "closedAt": "2026-09-01T08:21:55.058Z"
+    },
+    {
+      "id": "2026-08-11-session-no_entry",
+      "source": "nine-sixteen",
+      "dateIST": "2026-08-11",
+      "status": "no_entry",
+      "leg": null,
+      "tradingsymbol": null,
+      "quantity": null,
+      "open915": null,
+      "close915": null,
+      "change915": null,
+      "entrySpot": null,
+      "targetSpot": null,
+      "entryPrice": null,
+      "exitPrice": null,
+      "exitSpot": null,
+      "pnl": null,
+      "exitReason": "NO ENTRY · Missed 9:16 entry window",
+      "message": "NO ENTRY · Missed 9:16 entry window",
+      "logs": [
+        {
+          "time": "10:19:35",
+          "message": "Server 9:16 bot enabled",
+          "type": "info"
+        }
+      ],
+      "createdAt": "2026-08-11T04:49:35.748Z",
+      "closedAt": "2026-08-11T04:49:35.748Z"
+    },
+    {
+      "id": "2026-08-10-session-no_entry",
+      "source": "nine-sixteen",
+      "dateIST": "2026-08-10",
+      "status": "no_entry",
+      "leg": null,
+      "tradingsymbol": null,
+      "quantity": null,
+      "open915": null,
+      "close915": null,
+      "change915": null,
+      "entrySpot": null,
+      "targetSpot": null,
+      "entryPrice": null,
+      "exitPrice": null,
+      "exitSpot": null,
+      "pnl": null,
+      "exitReason": "NO ENTRY · Missed 9:16 entry window",
+      "message": "NO ENTRY · Missed 9:16 entry window",
+      "logs": [
+        {
+          "time": "13:24:18",
+          "message": "Server 9:16 bot enabled",
+          "type": "info"
+        }
+      ],
+      "createdAt": "2026-08-10T07:54:19.359Z",
+      "closedAt": "2026-08-10T07:54:19.359Z"
+    },
+    {
+      "id": "2026-07-31-NIFTY2680424350CE-closed",
+      "source": "nine-sixteen",
+      "dateIST": "2026-07-31",
+      "status": "closed",
+      "leg": "CE_BUY",
+      "tradingsymbol": "NIFTY2680424350CE",
+      "quantity": 325,
+      "open915": 24361.45,
+      "entrySpot": null,
+      "targetSpot": 24391.45,
+      "entryPrice": 106.57,
+      "exitPrice": 115.7,
+      "exitSpot": 24381.35,
+      "pnl": 2967.250000000003,
+      "exitReason": "Reconciled — flat on Zerodha",
+      "message": "Session complete · position closed on Zerodha",
+      "logs": [
+        {
+          "time": "12:31:15",
+          "message": "Off-whitelist IP detected (65.2.63.147) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:31:13",
+          "message": "Off-whitelist IP detected (3.110.149.135) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:31:12",
+          "message": "Off-whitelist IP detected (65.0.69.82) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:31:11",
+          "message": "Off-whitelist IP detected (65.2.63.147) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:30:55",
+          "message": "Off-whitelist IP detected (3.110.149.135) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:30:54",
+          "message": "Off-whitelist IP detected (65.2.63.147) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:30:48",
+          "message": "Off-whitelist IP detected (3.110.149.135) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:30:47",
+          "message": "Off-whitelist IP detected (65.2.63.147) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:30:27",
+          "message": "Off-whitelist IP detected (3.110.149.135) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:30:27",
+          "message": "Off-whitelist IP detected (65.2.63.147) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:30:07",
+          "message": "Off-whitelist IP detected (3.110.149.135) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:30:06",
+          "message": "Off-whitelist IP detected (65.2.63.147) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:30:06",
+          "message": "Off-whitelist IP detected (65.0.69.82) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:28:22",
+          "message": "Off-whitelist IP detected (65.2.63.147) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:28:22",
+          "message": "Off-whitelist IP detected (13.126.179.83) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:28:06",
+          "message": "Off-whitelist IP detected (65.2.63.147) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:28:06",
+          "message": "Off-whitelist IP detected (13.126.179.83) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:28:05",
+          "message": "Off-whitelist IP detected (65.2.63.147) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:28:04",
+          "message": "Off-whitelist IP detected (13.126.179.83) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        },
+        {
+          "time": "12:27:37",
+          "message": "Off-whitelist IP detected (65.2.63.147) — cannot add to Kite (2 IP limit). Set KITE_EGRESS_RELAY_URL to your production app (175.184.252.162 or 122.186.158.142). Kite Connect → https://developers.kite.trade/apps/2y8e0t5e25fekur4.",
+          "type": "warning"
+        }
+      ],
+      "createdAt": "2026-07-31T07:01:27.693Z",
+      "closedAt": "2026-07-31T07:01:27.693Z"
+    },
+    {
+      "id": "2026-07-27-NIFTY26JUL23950CE-closed",
+      "source": "nine-sixteen",
+      "dateIST": "2026-07-27",
+      "status": "closed",
+      "leg": "CE_BUY",
+      "tradingsymbol": "NIFTY26JUL23950CE",
+      "quantity": 65,
+      "open915": 23928.4,
+      "entrySpot": null,
+      "targetSpot": 23978.4,
+      "entryPrice": 81.2,
+      "exitPrice": 89.3,
+      "exitSpot": null,
+      "pnl": 526.4999999999997,
+      "exitReason": "Reconciled — flat on Zerodha",
+      "message": "Session complete · position closed on Zerodha",
+      "logs": [],
+      "createdAt": "2026-07-27T08:27:10.238Z",
+      "closedAt": "2026-07-27T08:27:10.238Z"
+    }
+  ],
+  "updatedAt": "2026-10-09T09:45:36.482Z"
+}
