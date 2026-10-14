@@ -58,6 +58,25 @@ export const NINE_SIXTEEN_HYBRID_PE_ADVERSE_CHECK_SEC = 9 * 3600 + 26 * 60;
 /** 9:16 CE — one-shot adverse check on the first WS tick at or after this second. */
 export const NINE_SIXTEEN_HYBRID_CE_ADVERSE_CHECK_SEC = 9 * 3600 + 17 * 60;
 export const NINE_SIXTEEN_HYBRID_ADVERSE_STOP_PTS = 40;
+
+/** One 9:16 minute: exit when a Nifty tick runs this far against that minute's own open. */
+export const NINE_SIXTEEN_MINUTE_SPIKE_PTS = 25;
+
+/**
+ * True once this tick is at least `points` against the trade from the current minute's open.
+ * PE (want Nifty down) triggers above the open. CE (want Nifty up) triggers below it.
+ */
+export function shouldExitNineSixteenMinuteSpike(
+  spot: number,
+  minuteOpen: number,
+  leg: TradeLeg,
+  points = NINE_SIXTEEN_MINUTE_SPIKE_PTS,
+): boolean {
+  if (spot <= 0 || minuteOpen <= 0) return false;
+  if (leg === "PE_BUY") return spot + 1e-9 >= minuteOpen + points;
+  if (leg === "CE_BUY") return spot <= minuteOpen - points + 1e-9;
+  return false;
+}
 /** From 3:00 PM IST — exit if Nifty is within this many index points of the ±target level (unused in live bot). */
 export const NINE_SIXTEEN_NEAR_TARGET_EXIT_START_MINUTE = 15 * 60;
 export const NINE_SIXTEEN_NEAR_TARGET_MAX_DISTANCE = 50;
@@ -395,28 +414,6 @@ export function isIn91659WsCloseSecond(nowMs = Date.now()): boolean {
 
 export function isPast916GreenMinuteRetarget(nowMs = Date.now()): boolean {
   return istSecondsOfDay(new Date(nowMs)) >= NINE_SIXTEEN_HYBRID_GREEN_MINUTE_RETARGET_SEC;
-}
-
-/** 9:17:00–9:17:59 — the only minute the 9:16 opposite-body exit may fire (a restart later must not trigger it). */
-export function isIn917OppositeBodyExitMinute(nowMs = Date.now()): boolean {
-  const nowSec = istSecondsOfDay(new Date(nowMs));
-  return (
-    nowSec >= NINE_SIXTEEN_HYBRID_GREEN_MINUTE_RETARGET_SEC &&
-    nowSec < NINE_SIXTEEN_HYBRID_GREEN_MINUTE_RETARGET_SEC + 60
-  );
-}
-
-/** 9:16 candle body points the other way from the 9:15 body and is at least as large. */
-export function is916BodyOppositeAtLeast915(
-  open915: number,
-  close915: number,
-  open916: number,
-  close916: number,
-): boolean {
-  const body915 = close915 - open915;
-  const body916 = close916 - open916;
-  if (body915 === 0 || body916 === 0 || Math.sign(body915) === Math.sign(body916)) return false;
-  return Math.abs(body916) + 1e-9 >= Math.abs(body915);
 }
 
 /** Ready to place CE/PE after open+close are captured. */
@@ -1105,14 +1102,6 @@ export function pnlPctOfEntryCost(
   return (unrealisedPnl / (entryPrice * quantity)) * 100;
 }
 
-/** Market sell when the option loss reaches this share of capital deployed (entry premium × qty). */
-export const CAPITAL_STOP_LOSS_PCT = 30;
-
-/** True once unrealised P&L is at or below −30% of the premium paid. */
-export function shouldExitCapitalStopLoss(pnlPct: number | null): boolean {
-  return pnlPct != null && Number.isFinite(pnlPct) && pnlPct <= -CAPITAL_STOP_LOSS_PCT;
-}
-
 /**
  * 9:16 trailing P&L ladder — each target tier locks a stop floor; slipping below the floor exits.
  * Reaching +50% exits at market instantly (no trail-back).
@@ -1407,7 +1396,6 @@ export type NineFifteenExitVia =
   | "market"
   | "trail-stop"
   | "hard-stop"
-  | "capital-stop"
   | "eod"
   | "flat-on-kite";
 
@@ -1436,11 +1424,9 @@ export function formatNineFifteenExitSummary(input: {
           ? `market exit (+${tpPct}% backup)`
           : input.via === "hard-stop"
             ? "hard stop (market)"
-            : input.via === "capital-stop"
-              ? `capital stop −${CAPITAL_STOP_LOSS_PCT}% of deployed capital (market)`
-              : input.via === "flat-on-kite"
-                ? "position already flat on Kite (closed outside the bot)"
-                : "end-of-day square-off (market)";
+            : input.via === "flat-on-kite"
+              ? "position already flat on Kite (closed outside the bot)"
+              : "end-of-day square-off (market)";
   const parts = [
     `TRADE EXITED · ${legTag} ${viaLabel}`,
     `${input.quantity} qty`,

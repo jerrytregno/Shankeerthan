@@ -582,7 +582,7 @@ function reportBothPeriods(title: string, all: Trade[]) {
   }
 }
 
-/** Wins that first went this far against are where the live −30% capital stop would likely have fired. */
+/** Wins that first went this far against are where the live −40% capital stop would likely have fired. */
 const CAPITAL_STOP_PROXY_PTS = 50;
 
 function strictWin(t: Trade): boolean {

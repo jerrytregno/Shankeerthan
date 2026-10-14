@@ -16,7 +16,7 @@ The server runs two independent morning trades on the same bot, plus an optional
 | When it buys | 9:15:11 | 9:16:01 | 14:06 (first tick in window) |
 | Signal | Red ≥ 5 / green ≥ 10 vs open | Red/green ≥ 15 on 9:15 candle | 100+ from open **and** today’s range through 14:05 > yesterday full range → **fade** |
 | Order type | Market buy | Market buy | Market buy |
-| Main exit | Trailing P&amp;L ladder on option | Take-profit limit + Nifty index exit | **Nifty index trail** (25 / 5 / 4 / 10) + −30% capital stop |
+| Main exit | Trailing P&amp;L ladder on option | Take-profit limit + Nifty index exit | **Nifty index trail** (25 / 5 / 4 / 10) |
 
 A day can have no trade, only the 9:15 trade, only the 9:16 trade, or both morning legs one after the other. The two morning legs can never be open together. If the 9:15 trade is still open at 9:16:00, the 9:16 trade is skipped for the day (with one exception, see 1.10).
 
@@ -178,15 +178,7 @@ Before 10:00 there is no hard stop.
 
 Any 9:15 position still open at 3:25 PM is sold at market, whatever the P&L.
 
-### 1.13 Capital stop −30%
-
-On every option websocket tick, if unrealised P&L reaches **−30% of capital deployed** (entry premium × quantity), any resting limit is cancelled and the position is sold at market. The same stop applies to the 9:16 trade. Whichever exit prints first closes the leg.
-
-### 1.14 There is no trailing stop
-
-Apart from the exits above, there is no other option-price stop and no trailing ladder on this write-up. The trade either hits a take-profit, the −30% capital stop, the small-body exit or the hard stop, or runs until 3:25 PM.
-
-### 1.15 9:15 trade, full worked example (a Monday)
+### 1.13 9:15 trade, full worked example (a Monday)
 
 1. 9:15:00.2: open = 24,000.00.
 2. 9:15:04: ATM 24000 CE and PE are pre-resolved.
@@ -335,26 +327,20 @@ If the 40-point stop does **not** fire at that tick, the bot arms **entry return
 
 Runs alongside the take-profit limit and parallel index exit; the first to trigger wins. The 9:15 leg still uses the **10:00 AM ±30** hard stop; the 9:16 leg does not.
 
-**9:17:00 opposite-body exit.** On the first Nifty websocket tick at or after 9:17:00 (only within the 9:17 minute), the bot compares the two candle bodies from websocket ticks:
+### 2.9.1 Minute spike — 25 points against the current minute
 
-- 9:15 body = 9:15:59 close − 9:15 open (the body that chose the trade)
-- 9:16 body = last tick in 9:16:59 − first tick at 9:16:00
+On every Nifty websocket tick while the 9:16 leg is open, the bot keeps the **first tick of the current IST minute** as that minute's open. If a later tick in the same minute is **25 points against that open**, it sells at market immediately.
 
-If the 9:16 body points the other way and is **at least as many points** as the 9:15 body, the 9:16 trade is sold at market. Example: 9:15 red by 20 (PE bought), 9:16 green by 20 or more → exit at 9:17:00. This check runs before the 9:17 CE retarget and the CE 40-point checkpoint. If either candle's ticks are missing, the check is skipped and logged.
+- **PE:** Nifty ≥ minute open **+ 25**
+- **CE:** Nifty ≤ minute open **− 25**
+
+The next minute's first tick becomes the new open, and the 25 points start again. This runs for the whole 9:16 trade, including after the trail is armed. Whichever exit the tick hits first closes the leg.
 
 ### 2.10 Exit 5: 3:25 PM square-off
 
 Any 9:16 position still open at 3:25 PM is sold at market.
 
-### 2.11 Capital stop −30%
-
-On every option websocket tick, if unrealised P&L reaches **−30% of capital deployed** (entry premium × quantity), the resting take-profit limit is cancelled and the position is sold at market. The same stop applies to the 9:15 trade.
-
-### 2.12 There is no trailing stop
-
-There is no trailing ladder. The trade closes on the first of the take-profit limit, market backup, −30% capital stop, index exit, 9:17 opposite-body exit, adverse checkpoint / entry return, or 3:25 PM.
-
-### 2.13 How an exit actually fires (both trades)
+### 2.11 How an exit actually fires (both trades)
 
 - Parallel index exit, adverse checkpoint, and entry return are checked on **every Nifty websocket tick**, about 4 a second. A separate **1-second safety check** repeats them even if the rest of the bot stalls. They never wait behind a Kite request.
 - On the tick that crosses the level, the bot cancels the take-profit limit and sells the **whole position at market** in parallel orders (max 25 lots each, up to 9 at once). Fills are checked every 0.2 seconds.
@@ -389,7 +375,6 @@ Enabled when the server flag is on (default on unless `FADE_1405_ENABLED=0`). Us
 ### 3.2 Exit
 
 - **Nifty trail on every tick:** initial stop **25** points against the entry spot; once **+5** in favour, trail **4** points behind the best favourable move with floor **+5**; hard cap **+10** on Nifty points; if still open, **flat at 3:20 PM** on the index schedule used in backtest.
-- **−30% capital stop** on option LTP (same as morning legs).
 - **3:25 PM** market square-off if anything is still open (bot-wide cutoff).
 
 There is **no** 9:16-style take-profit limit or ±12/±8 index target on this leg.
@@ -408,7 +393,7 @@ There is **no** 9:16-style take-profit limit or ±12/±8 index target on this le
 | Margin retries until | 9:15:15 (top-ups until 9:15:20) | 9:16:30 | Same burst pattern in 14:06 window |
 | PE take-profit | trailing ladder from +3% | weekday × same/different colour (section 2.6) | Nifty trail only |
 | CE take-profit | trailing ladder from +3% | same table as PE (section 2.6) | Nifty trail only |
-| Market backup | Yes, same % | Yes, same % | No TP limit — trail / capital stop |
+| Market backup | Yes, same % | Yes, same % | No TP limit — Nifty trail |
 | Index exit | No | Yes: ∓12 / ∓8, then ∓6 from 9:17 | Trail 25/5/4/10 + 3:20 flat |
 | Small-body exit | Yes, at 9:16:01 if 9:15 body < 5 | No | No |
 | Hard stop / adverse | From 10:00, 30 points against | PE @ 9:26 · CE @ 9:17: 40 pts adverse, else entry return | Initial 25-pt Nifty stop only |

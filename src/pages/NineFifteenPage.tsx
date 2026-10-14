@@ -24,9 +24,8 @@ export default function NineFifteenPage() {
         <div className="card nf-live-rules">
           <h2 className="nf-live-rules-title">Live strategies — entry &amp; exit rules</h2>
           <p className="nf-live-rules-lead text-muted">
-            Morning 9:15 and 9:16 legs plus an optional <strong>14:05 trend-day fade</strong> (14:06 entry) on the
-            same bot. Backtests:{" "}
-            <a href="/dashboard/fade-1405-backtest">14:05 fade</a> ·{" "}
+            Morning 9:15 and 9:16 legs plus an optional <strong>14:05 trend-day fade</strong> on the same bot.
+            Backtests: <a href="/dashboard/fade-1405-backtest">14:05 fade</a> ·{" "}
             <strong>{NINE_FIFTEEN_RED_916_BACKTEST_TITLE}</strong>.
           </p>
 
@@ -93,11 +92,6 @@ export default function NineFifteenPage() {
                   <strong>immediate market exit</strong>.
                 </li>
                 <li>
-                  <strong>Capital stop −30%</strong> — on every option LTP websocket tick, if unrealised P&amp;L
-                  reaches <strong>−30% of capital deployed</strong> (entry premium × qty), cancel any resting
-                  limit and <strong>immediate market exit</strong>. Same rule on the 9:16 trade.
-                </li>
-                <li>
                   <strong>3:25 PM</strong> — square off at market if still open regardless of P&amp;L.
                 </li>
                 <li>
@@ -122,7 +116,8 @@ export default function NineFifteenPage() {
               <p className="nf-live-rules-foot text-muted">
                 When the 9:15 leg closes before 9:16:00, the 9:16 decision still runs at 9:16:00 unless the
                 9:15 trade is still open. If the 9:15 signal itself qualifies (red ≥ 5 or green ≥ 10 at the
-                10-second read) and that order is not filled, the day is finished — 9:16 does not trade.
+                10-second read), the buy goes out at <strong>9:15:11</strong>. A tick in the second before that
+                order is not a missed trade. If that order does not fill, the 9:16 decision still runs.
               </p>
             </div>
 
@@ -190,9 +185,9 @@ export default function NineFifteenPage() {
                   </table>
                 </div>
                 <p className="nf-trail-method-note text-muted">
-                  Once the trail is armed, only the trail (plus <strong>−30% capital stop</strong> and{" "}
-                  <strong>3:25 PM</strong>) controls profit exit — pre-target adverse / opposite-body rules no longer
-                  apply. Before the target touches, those guards and the CE 9:17 entry-spot aim still run.
+                  Once the trail is armed, only the trail and <strong>3:25 PM</strong> control profit exit —
+                  pre-target adverse rules no longer apply. Before
+                  the target touches, those guards and the CE 9:17 entry-spot aim still run.
                 </p>
               </div>
               <h4 className="nf-live-rules-subheading">Entry</h4>
@@ -217,9 +212,8 @@ export default function NineFifteenPage() {
                   <strong>9:16:00</strong> (logged as 9:15:59 close).
                 </li>
                 <li>
-                  <strong>No 9:16 after a missed 9:15 signal.</strong> If the 9:15:10 read qualifies (red ≥ 5
-                  or green ≥ 10) and the 9:15 order is not filled, the rest of the day is skipped, including
-                  this 9:16 trade.
+                  <strong>9:16 still runs</strong> if the 9:15 order does not fill. It is blocked only while that
+                  9:15 order is still being sent, or when the 9:15 leg is still open at 9:16:00.
                 </li>
                 <li>
                   <strong>Order on the first Nifty websocket tick @ 9:16:00</strong> · option websocket armed from{" "}
@@ -252,9 +246,10 @@ export default function NineFifteenPage() {
                   every exit is a <strong>market sell</strong>.
                 </li>
                 <li>
-                  <strong>Capital stop −30%</strong> — on every option LTP websocket tick, if unrealised P&amp;L
-                  reaches <strong>−30% of capital deployed</strong> (entry premium × qty), the position is sold at
-                  market. Same rule on the 9:15 trade.
+                  <strong>25-pt minute spike</strong> — on every Nifty websocket tick from 9:16, each minute is
+                  measured from its own first tick. The moment Nifty is <strong>25 points against that open</strong>{" "}
+                  (PE: tick ≥ open + 25 · CE: tick ≤ open − 25), <strong>immediate market exit</strong>. The next
+                  minute starts the count again from its own first tick.
                 </li>
                 <li>
                   <strong>Nifty target — arms the trail, does not sell.</strong> Measured from the Nifty spot at
@@ -325,15 +320,10 @@ export default function NineFifteenPage() {
                   The 9:15 leg still uses the <strong>10:00 AM ±30</strong> hard stop; the 9:16 leg does not.
                 </li>
                 <li>
-                  <strong>9:17:00 opposite-body exit (9:16 trade)</strong> — if the 9:16 candle body (9:16:00 first
-                  tick → 9:16:59 last tick) points against the 9:15 body and is at least as many points, sell at
-                  market at 9:17:00 (only if the trail is not yet armed).
-                </li>
-                <li>
                   <strong>3:25 PM</strong> force square-off if still open.
                 </li>
                 <li>
-                  <strong>How exits fire</strong> — trail stop, pre-trail guards, and capital stop are evaluated on{" "}
+                  <strong>How exits fire</strong> — the 25-pt minute spike, trail stop, and pre-trail guards are evaluated on{" "}
                   <strong>every Nifty / option websocket tick</strong>, plus a <strong>1-second safety check</strong>{" "}
                   if the main loop stalls. Triggers send a <strong>parallel market sell</strong> (max 25 lots per
                   order, up to 9 at once); fills are polled every <strong>0.2 s</strong>.
@@ -346,7 +336,7 @@ export default function NineFifteenPage() {
               <p className="nf-live-rules-lead text-muted">
                 Separate afternoon leg after the morning session. Exit follows the{" "}
                 <strong>Nifty index trail</strong> (not the 9:16 index targets): stop 25, lock once +5, trail 4,
-                cap +10, flat 3:20, plus the <strong>−30% capital stop</strong> on option LTP.
+                cap +10, flat 3:20.
               </p>
               <h4 className="nf-live-rules-subheading">Entry (all must pass at 14:05 close)</h4>
               <ol className="nf-live-rules-list">

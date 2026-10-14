@@ -49,6 +49,8 @@ interface BotStatus {
   hardStopStartLabel?: string;
   hybrid916AdverseCheckpointEvaluated?: boolean;
   hybrid916EntryReturnArmed?: boolean;
+  nineSixteenMinuteOpen?: number | null;
+  nineSixteenMinuteSpikeStop?: number | null;
   leg: string | null;
   tradingsymbol: string | null;
   targetSpot: number | null;
@@ -328,7 +330,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
           <div>
             <h2 className="pat-title">Server 9:16 bot (Lightsail)</h2>
               <p className="pat-sub">
-                9:15 + 9:16 morning · optional 14:05 fade · websocket 9:00–16:00
+                9:15 + 9:16 morning · optional 14:05 fade
               </p>
           </div>
         </div>
@@ -377,7 +379,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                 : "14:05 fade armed for this afternoon."}
           </strong>{" "}
           {onFade1405Leg
-            ? "Exit on Nifty trail (25 / 5 / 4 / 10) or −30% capital stop — not the 9:16 index target."
+            ? "Exit on Nifty trail (25 / 5 / 4 / 10) — not the 9:16 index target."
             : status.fade1405Settled
               ? "No second 14:05 entry today."
               : "After morning legs finish, watches 14:05 close for 100+ pts from 9:15 open and range vs yesterday."}
@@ -470,8 +472,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                   {status.pnlLockedPct != null && status.pnlLockedPct > 0
                     ? ` · stop floor +${status.pnlLockedPct}%`
                     : ""}
-                  . Hitting the target ratchets the ladder (does not exit); slip to the stop floor → market exit.
-                  <strong> Capital stop −30%</strong> of deployed capital on an option tick → market exit.{" "}
+                  . Hitting the target ratchets the ladder (does not exit); slip to the stop floor → market exit.{" "}
                   {status.pnlExitSchedule ? <> Schedule: {status.pnlExitSchedule}.</> : null}{" "}
                   <strong>9:15:57 flip</strong> — not in profit and Nifty ≥15 pts against vs 9:15 open → market exit
                   for 9:16 (|Δ| ≥ 15 on sealed 9:15 candle).{" "}
@@ -491,8 +492,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                       ? ` (now +${formatNumber(status.nineSixteenTrailBestClosePoints, 2)} pts)`
                       : ""}{" "}
                     − 4 pts and never back. Market sell on the first Nifty tick at the stop; anything open at{" "}
-                    <strong>10:00</strong> sells at market. <strong>Capital stop −30%</strong> and{" "}
-                    <strong>3:25 PM</strong> square-off still apply.
+                    <strong>10:00</strong> sells at market. <strong>3:25 PM</strong> square-off still applies.
                   </>
                 ) : (
                   <>
@@ -516,7 +516,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                         A CE that misses the target by 9:17 sells when Nifty is back at the <strong>entry spot</strong>.{" "}
                       </>
                     ) : null}
-                    <strong>Capital stop −30%</strong> · <strong>3:25 PM</strong> square-off.
+                    <strong>3:25 PM</strong> square-off.
                   </>
                 )
               ) : (
@@ -524,8 +524,16 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                   9:16 has <strong>no limit sell</strong>. The first Nifty tick at the target (PE −12 / −8 · CE +12 /
                   +8 until 9:17) locks <strong>target − 2</strong>; the stop then follows the best 1-minute close by{" "}
                   <strong>4 pts</strong>, sells at market on the stop, and anything open at <strong>10:00</strong> sells.
-                  Before the target: adverse checkpoint / entry return, 9:17 opposite-body exit, CE entry-spot aim from
-                  9:17. <strong>Capital stop −30%</strong> of deployed capital · <strong>3:25 PM</strong> square-off.
+                  Before the target: adverse checkpoint / entry return, CE entry-spot aim from 9:17.{" "}
+                  <strong>3:25 PM</strong> square-off.
+                </>
+              )}
+              {status.nineSixteenMinuteOpen != null && status.nineSixteenMinuteSpikeStop != null && (
+                <>
+                  {" "}
+                  This minute opened at <strong>{formatNumber(status.nineSixteenMinuteOpen, 2)}</strong>. Market
+                  sell if Nifty {status.leg === "CE_BUY" ? "≤" : "≥"}{" "}
+                  <strong>{formatNumber(status.nineSixteenMinuteSpikeStop, 2)}</strong> (25 pts against that open).
                 </>
               )}
             </span>
@@ -1053,8 +1061,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
         <strong>9:16 trade</strong> (armed on server): 9:15 WS close − open = Δ · flat or |Δ| &lt; 15 → skip ·{" "}
         <strong>|Δ| ≥ 15</strong> → red buys ATM PE, green buys ATM CE · <strong>NRML market BUY</strong> @{" "}
         <strong>9:16:00</strong> first WS tick (CE + PE WS from 9:15:58 · sized on latest WS price + 3% cushion · retries until{" "}
-        <strong>9:16:30</strong>). Skipped if the 9:15 leg is still open at 9:16:00, and skipped for the whole
-        day when the 9:15 signal qualifies and that order is not filled. Exit: <strong>no limit sell</strong> — the
+        <strong>9:16:30</strong>). Skipped only if the 9:15 leg is still open at 9:16:00. Exit: <strong>no limit sell</strong> — the
         first Nifty tick at the target (PE <strong>−12</strong> until a print above the <strong>9:15:59 close</strong>,
         then <strong>−8</strong> · CE +12/+8 until 9:17) locks <strong>target − 2</strong>; at every 1-minute close the
         stop moves to the best close − <strong>4</strong> pts; <strong>market sell</strong> on the stop; flat at{" "}

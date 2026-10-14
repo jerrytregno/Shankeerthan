@@ -3,7 +3,8 @@
  *
  * Baseline = the 9:16 backtesting pages: red 9:15 (|Δ| ≥ 15) → PE, green → CE, entry at the
  * 9:16 open, flat 12 (9:16 open keeps the 9:15 colour) / 8 (gap against it) Nifty target,
- * 9:17 opposite-body exit, 40 points against at the 9:26 (PE) / 9:17 (CE) bar open, otherwise
+ * 40 points against at the 9:26 (PE) / 9:17 (CE) bar open, a minute that runs 25 pts
+ * against its own open is a loss, otherwise
  * out at that checkpoint if in profit, or later at the entry price.
  *
  * Rule tested: the first touch of the target no longer exits. It locks (target − buffer) and
@@ -45,7 +46,7 @@ const SYNTH_ARM_WINDOW = 11;
 
 type RawDay = { date: string; bars: number[][] };
 type Side = "PE" | "CE";
-type Kind = "target" | "checkpoint" | "return" | "stop" | "opposite" | "eod" | "trail" | "timecap";
+type Kind = "target" | "checkpoint" | "return" | "stop" | "eod" | "trail" | "timecap";
 type Basis = "high" | "close";
 
 interface Bar {
@@ -63,7 +64,6 @@ interface Trade {
   entry: number;
   confirm: boolean;
   target: number;
-  opposite917: boolean;
   bars: Bar[];
 }
 
@@ -119,8 +119,6 @@ function buildTrades(raw: RawDay[]): { sessions: string[]; trades: Trade[] } {
     const side: Side = change < 0 ? "PE" : "CE";
     const entry = b916.o;
     const confirm = side === "PE" ? entry <= b915.c + 1e-9 : entry >= b915.c - 1e-9;
-    const b917 = bars.find((b) => b.m === M917);
-    const body916 = b916.c - b916.o;
     trades.push({
       date: rd.date,
       side,
@@ -128,15 +126,32 @@ function buildTrades(raw: RawDay[]): { sessions: string[]; trades: Trade[] } {
       entry,
       confirm,
       target: confirm ? TARGET_CONFIRM : TARGET_GAP,
-      opposite917:
-        b917 != null &&
-        body916 !== 0 &&
-        Math.sign(body916) !== Math.sign(change) &&
-        Math.abs(body916) + 1e-9 >= Math.abs(change),
       bars: bars.filter((b) => b.m >= M916),
     });
   }
   return { sessions, trades };
+}
+
+const MINUTE_SPIKE = 25;
+
+/** First minute that runs 25 pts against its own open before the flat target. */
+function minuteSpikeBeforeTarget(t: Trade): number | null {
+  const targetPx = t.entry + t.dir * t.target;
+  for (const b of t.bars) {
+    const spike = t.side === "PE" ? b.h - b.o : b.o - b.l;
+    const spikeHit = spike + 1e-9 >= MINUTE_SPIKE;
+    const targetHit = t.side === "CE" ? b.h + 1e-9 >= targetPx : b.l <= targetPx + 1e-9;
+    if (targetHit && spikeHit) {
+      const openedThrough = t.side === "CE" ? b.o + 1e-9 >= targetPx : b.o <= targetPx + 1e-9;
+      if (openedThrough) return null;
+      const dist = t.side === "CE" ? targetPx - b.o : b.o - targetPx;
+      if (dist <= MINUTE_SPIKE + 1e-9) return null;
+    } else if (targetHit) {
+      return null;
+    }
+    if (spikeHit) return b.m;
+  }
+  return null;
 }
 
 /** Mirror of hybrid916Outcome in server/nine-fifteen-candles.ts — win/loss only. */
@@ -150,15 +165,30 @@ function pageWin(t: Trade): boolean {
       break;
     }
   }
-  const targetIn916 = targetMin != null && targetMin < M917;
-  if (t.opposite917 && !targetIn916) {
-    const b917 = t.bars.find((b) => b.m === M917)!;
-    return t.side === "CE" ? b917.o > t.entry : b917.o < t.entry;
-  }
   const cpBar = t.bars.find((b) => b.m === deadline);
   const adverseOpen = cpBar ? (t.side === "PE" ? cpBar.o - t.entry : t.entry - cpBar.o) : Number.NaN;
   const stopped =
     !(targetMin != null && targetMin <= deadline) && Number.isFinite(adverseOpen) && adverseOpen + 1e-9 >= ADVERSE_STOP;
+  const spikeMin = minuteSpikeBeforeTarget(t);
+  if (spikeMin != null && !(stopped && spikeMin >= deadline)) {
+    const returnBar = stopped
+      ? undefined
+      : t.bars.find(
+          (b) => b.m >= deadline && (t.side === "PE" ? b.l <= t.entry + 1e-9 : b.h + 1e-9 >= t.entry),
+        );
+    if (returnBar && returnBar.m < spikeMin) {
+      /* return to the 9:16 price printed first */
+    } else if (returnBar && returnBar.m === spikeMin) {
+      const dist = t.side === "PE" ? returnBar.o - t.entry : t.entry - returnBar.o;
+      if (dist <= MINUTE_SPIKE + 1e-9) {
+        /* return is closer to the open than the 25-pt spike */
+      } else {
+        return false;
+      }
+    } else {
+      return false;
+    }
+  }
   if (stopped) return false;
   if (targetMin != null && targetMin <= deadline) return true;
   const returned = t.bars.some(
@@ -187,7 +217,7 @@ function simulate(t: Trade, rule: Rule | null): Result {
   let checkpointDone = false;
 
   const exit = (kind: Kind, pnl: number, min: number): Result => ({
-    win: kind === "stop" || kind === "eod" ? false : kind === "opposite" ? pnl > 0 : pnl >= -1e-9,
+    win: kind === "stop" || kind === "eod" ? false : pnl >= -1e-9,
     pnl,
     kind,
     exitMin: min,
@@ -233,7 +263,6 @@ function simulate(t: Trade, rule: Rule | null): Result {
       const r = walk(lastFav, pts[0], m);
       if (r) return r;
     }
-    if (m === M917 && phase === "pre" && t.opposite917) return exit("opposite", pts[0], m);
     if (!checkpointDone && m >= checkpoint) {
       checkpointDone = true;
       if (phase === "pre") {

@@ -13,6 +13,8 @@ import {
   shouldHybrid916ReturnToEntryExit,
   isPastHybrid916AdverseCheckpoint,
   NINE_SIXTEEN_HYBRID_ADVERSE_STOP_PTS,
+  NINE_SIXTEEN_MINUTE_SPIKE_PTS,
+  shouldExitNineSixteenMinuteSpike,
   hybrid916IndexTargetPoints,
   computeHybrid916IndexExitSpot,
   is916RedConfirmFromCaptures,
@@ -29,9 +31,6 @@ import {
   isTuesdayIst,
   getIndexExitScheduleLabel,
   getPnlExitScheduleLabel,
-  pnlPctOfEntryCost,
-  shouldExitCapitalStopLoss,
-  CAPITAL_STOP_LOSS_PCT,
   armNineSixteenTrail,
   stepNineSixteenTrail,
   shouldExitNineSixteenTrail,
@@ -235,14 +234,13 @@ console.log(
 );
 console.log("hybrid adverse pts", NINE_SIXTEEN_HYBRID_ADVERSE_STOP_PTS);
 
-console.log("\n--- capital stop −30% of deployed ---");
-console.log("pct", CAPITAL_STOP_LOSS_PCT);
-console.log("−30 exits", ok(shouldExitCapitalStopLoss(-30)));
-console.log("−30.01 exits", ok(shouldExitCapitalStopLoss(-30.01)));
-console.log("−29.99 holds", ok(!shouldExitCapitalStopLoss(-29.99)));
-console.log("profit holds", ok(!shouldExitCapitalStopLoss(10)));
-console.log("unknown holds", ok(!shouldExitCapitalStopLoss(null)));
-console.log("entry 100 × 65, price 70 → −30%", ok(pnlPctOfEntryCost((70 - 100) * 65, 100, 65) === -30));
+console.log("\n--- 9:16 minute spike (25 pts from this minute's open) ---");
+console.log("pts", NINE_SIXTEEN_MINUTE_SPIKE_PTS);
+console.log("PE +25 exits", ok(shouldExitNineSixteenMinuteSpike(24_025, 24_000, "PE_BUY")));
+console.log("PE +24.99 holds", ok(!shouldExitNineSixteenMinuteSpike(24_024.99, 24_000, "PE_BUY")));
+console.log("CE −25 exits", ok(shouldExitNineSixteenMinuteSpike(23_975, 24_000, "CE_BUY")));
+console.log("CE −24.99 holds", ok(!shouldExitNineSixteenMinuteSpike(23_975.01, 24_000, "CE_BUY")));
+console.log("open tick holds", ok(!shouldExitNineSixteenMinuteSpike(24_000, 24_000, "PE_BUY")));
 
 console.log("\n--- 9:16 trail (lock target − 2 · stop = best 1-min close − 4 · flat 10:00) ---");
 console.log("PE favourable = entry − spot", ok(nineSixteenFavourablePoints(23_988, 24_000, "PE_BUY") === 12));

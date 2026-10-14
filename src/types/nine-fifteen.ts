@@ -169,12 +169,17 @@ export interface NineFifteenCandleRow {
   peAdverseStopTouch?: NineFifteenAdverseStopTouch | null;
   /** Set when green 9:17 bar open is ≥40 pts against the 9:16 entry. */
   ceAdverseStopTouch?: NineFifteenAdverseStopTouch | null;
+  /**
+   * First minute that runs 25 pts against its own open before the flat target (red / PE).
+   * Fill is that minute's open + 25. Null when the target prints first.
+   */
+  peMinuteSpikeStop?: NineFifteenAdverseStopTouch | null;
+  /** Green / CE mirror: fill is that minute's open − 25. */
+  ceMinuteSpikeStop?: NineFifteenAdverseStopTouch | null;
   /** First time at or after 9:26 that Nifty is back at the 9:16 open (red). */
   peReturnToEntryFrom926?: string | null;
   /** First time at or after 9:17 that Nifty is back at the 9:16 open (green). */
   ceReturnToEntryFrom917?: string | null;
-  /** Set when the 9:16 body points against the 9:15 body and is at least as big — exit at the 9:17 open. */
-  oppositeBody917Exit?: { timeIst: string; indexPrice: number } | null;
   /**
    * Breakout backtest only: first adverse touch of the fixed stop from the 9:16 entry
    * (CE stops below entry, PE stops above). Null when the day is not a trade day.
@@ -502,12 +507,12 @@ export interface NineFifteenCePeFailureTrade {
   nrmlCarry?: NineFifteenNrmlCarryOutcome | null;
   /** At 10:00 IST: Nifty vs the session exit target (entry ± targetPoints). */
   targetGapAt1000?: NineFifteenTargetGapAtCheckpoint | null;
+  /** Set when a single minute ran 25 pts against its own open and that closed the trade. */
+  minuteSpikeExit?: NineFifteenAdverseStopTouch | null;
   /** Set when the 9:26 red / 9:17 green 40-pt stop closed the trade. */
   adverseStopExit?: NineFifteenAdverseStopTouch | null;
   /** Held past the checkpoint without a 40-pt stop — closed at 15:30 (never returned to 9:16 open). */
   sessionEndExit?: { timeIst: string; indexPrice: number } | null;
-  /** 9:16 candle reversed at least the whole 9:15 body — closed at the 9:17 open. */
-  oppositeBodyExit?: { timeIst: string; indexPrice: number } | null;
 }
 
 /** Nifty at the fixed exit minute (red 9:26 · green 9:17) when the 40-pt stop fires. */

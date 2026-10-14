@@ -337,8 +337,8 @@ export default function Fade1405BacktestPage() {
                   <strong>fade</strong> at the <strong>14:06 open</strong> (100+ above open → ATM PE · 100+ below → ATM
                   CE). Exit: Nifty index trail — stop <strong>{trail?.stopPts ?? 25}</strong>, arm{" "}
                   <strong>+{trail?.armPts ?? 5}</strong>, trail <strong>{trail?.trailPts ?? 4}</strong>, cap{" "}
-                  <strong>+{trail?.maxProfitPts ?? 10}</strong>, session flat <strong>3:20</strong>. Live also uses the{" "}
-                  <strong>−30% capital stop</strong> on option LTP and <strong>3:25</strong> square-off like other legs.
+                  <strong>+{trail?.maxProfitPts ?? 10}</strong>, session flat <strong>3:20</strong>. Live also squares
+                  off at <strong>3:25</strong> if the leg is still open.
                 </p>
                 <p className="nf-cepe-steps text-muted">
                   {data.summary.wins}/{data.summary.tradeDays} trades won ({formatNumber(data.summary.winPct, 1)}%) ·{" "}

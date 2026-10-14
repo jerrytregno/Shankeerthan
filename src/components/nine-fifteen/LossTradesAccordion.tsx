@@ -477,6 +477,23 @@ function SessionDayAccordionItem({
   );
 }
 
+/** Nifty at exit minus the 9:16 open — the Difference column on the 9:16 win and loss tables. */
+export function niftyExitMinusOpen(
+  trade: NineFifteenCePeFailureTrade,
+  kind: "win" | "loss",
+): number | null {
+  const open916 = trade.entryAt?.indexPrice ?? null;
+  const exit =
+    kind === "win"
+      ? trade.targetHit
+      : (trade.minuteSpikeExit ?? trade.adverseStopExit ?? trade.sessionEndExit ?? null);
+  const exitNifty = exit?.indexPrice ?? null;
+  if (open916 == null || exitNifty == null || !Number.isFinite(open916) || !Number.isFinite(exitNifty)) {
+    return null;
+  }
+  return exitNifty - open916;
+}
+
 export function WinTradesAccordion({ trades }: { trades: NineFifteenCePeFailureTrade[] }) {
   if (trades.length === 0) return null;
 
@@ -499,7 +516,7 @@ export function WinTradesAccordion({ trades }: { trades: NineFifteenCePeFailureT
             const hit = trade.targetHit;
             const exitNifty = hit?.indexPrice ?? null;
             const exitClock = hit?.timeIst.slice(0, 5) ?? "—";
-            const diff = open916 != null && exitNifty != null ? exitNifty - open916 : null;
+            const diff = niftyExitMinusOpen(trade, "win");
             const exitLabel =
               hit?.levelLabel === "entry"
                 ? "Return to 9:16 open"
@@ -564,16 +581,17 @@ export function LossTradesAccordion({
         <tbody>
           {trades.map((trade) => {
             const open916 = trade.entryAt?.indexPrice ?? null;
-            const exit = trade.oppositeBodyExit ?? trade.adverseStopExit ?? trade.sessionEndExit ?? null;
+            const exit = trade.minuteSpikeExit ?? trade.adverseStopExit ?? trade.sessionEndExit ?? null;
             const exitNifty = exit?.indexPrice ?? null;
             const exitClock = exit?.timeIst.slice(0, 5) ?? "—";
-            const diff = open916 != null && exitNifty != null ? exitNifty - open916 : null;
-            const stopped = trade.adverseStopExit != null;
-            const exitNote = trade.oppositeBodyExit
-              ? " · 9:16 reversed the 9:15 body"
-              : !stopped && exit != null
-                ? " · no 40-pt stop"
-                : "";
+            const diff = niftyExitMinusOpen(trade, "loss");
+            const exitNote = trade.minuteSpikeExit
+              ? " · 25-pt minute"
+              : trade.adverseStopExit
+                ? ""
+                : exit != null
+                  ? " · no 40-pt stop"
+                  : "";
             return (
               <tr key={trade.date}>
                 <td className="font-mono">{trade.date}</td>

@@ -32,6 +32,7 @@ import {
   LossTradesAccordion,
   LateWinTradesAccordion,
   WinTradesAccordion,
+  niftyExitMinusOpen,
 } from "@/components/nine-fifteen/LossTradesAccordion";
 import "@/styles/nine-fifteen-page.css";
 
@@ -162,12 +163,42 @@ function rsiClass(value: number | null | undefined): string {
   return "";
 }
 
+function formatSignedPoints(value: number): string {
+  return `${value > 0 ? "+" : ""}${formatNumber(value, 2)}`;
+}
+
+/** Same colours as the Difference column: Nifty up is green, Nifty down is red. */
+function indexDiffTone(value: number): string {
+  if (value > 0) return "text-up";
+  if (value < 0) return "text-down";
+  return "";
+}
+
+function sumNiftyExitDiffs(
+  trades: NineFifteenCePeFailureTrade[],
+  kind: "win" | "loss",
+): number {
+  let sum = 0;
+  for (const trade of trades) {
+    const diff = niftyExitMinusOpen(trade, kind);
+    if (diff != null) sum += diff;
+  }
+  return sum;
+}
+
 function FollowFilterStatsCard({
   stats,
   sessionsLabel,
+  indexDiffTotal,
 }: {
   stats: NineFifteenFollowFilterStats;
   sessionsLabel: string;
+  /** Sum of (Nifty at exit − 9:16 open) for the listed win and loss rows. */
+  indexDiffTotal?: {
+    total: number;
+    winSum: number;
+    lossSum: number;
+  } | null;
 }) {
   const bandMax = stats.maxAbsDiffExclusive;
   const filterTitle =
@@ -197,6 +228,28 @@ function FollowFilterStatsCard({
         NSE session days from Zerodha Kite only ({sessionsLabel}) — holidays/weekends omitted when no candles.
       </p>
       <div className="nf-filter-stats-grid">
+        {indexDiffTotal != null && (
+          <div>
+            <span
+              className="nf-filter-stat-label"
+              title="Sum of Nifty at exit minus the 9:16 open, for every winning day and every losing day"
+            >
+              Total difference
+            </span>
+            <span
+              className={cn(
+                "nf-filter-stat-value",
+                indexDiffTone(indexDiffTotal.total),
+              )}
+            >
+              {formatSignedPoints(indexDiffTotal.total)}
+            </span>
+            <span className="nf-filter-stat-hint text-muted">
+              Wins {formatSignedPoints(indexDiffTotal.winSum)} · losses{" "}
+              {formatSignedPoints(indexDiffTotal.lossSum)}
+            </span>
+          </div>
+        )}
         <div>
           <span className="nf-filter-stat-label">Directional 9:15 days</span>
           <span className="nf-filter-stat-value">{stats.totalFollowTrades}</span>
@@ -683,6 +736,20 @@ function ConsolidatedBacktestResults({
   hourlyHitRuleLabel?: string;
   hybrid916SimpleTable?: boolean;
 }) {
+  const indexDiffTotal = hybrid916SimpleTable
+    ? (() => {
+        const passesMin = (t: NineFifteenCePeFailureTrade) =>
+          minAbsDiffExclusive
+            ? trade915EntrySize(t) > liveFloor
+            : trade915EntrySize(t) >= liveFloor;
+        const wins = (consolidated.successes ?? []).filter(passesMin);
+        const losses = (consolidated.failures ?? []).filter((t) => Math.abs(t.change) >= liveFloor);
+        const winSum = sumNiftyExitDiffs(wins, "win");
+        const lossSum = sumNiftyExitDiffs(losses, "loss");
+        return { total: winSum + lossSum, winSum, lossSum };
+      })()
+    : null;
+
   return (
     <>
       <p className="nf-cepe-footnote text-muted">
@@ -705,6 +772,7 @@ function ConsolidatedBacktestResults({
       <FollowFilterStatsCard
         stats={consolidatedFilter}
         sessionsLabel={`${sessions} sessions · ${historyLabel}`}
+        indexDiffTotal={indexDiffTotal}
       />
 
       <FollowStrategyWinsPanel
@@ -819,7 +887,8 @@ function Hybrid916BacktestSection({
             <strong>Both {v.colour} only</strong> — includes only days where{" "}
             <strong>9:16 open {v.confirmCmp} 9:15 close</strong> (second candle also {v.colour}). {v.Opposite}-gap
             days at 9:16 are excluded. Take profit is a flat{" "}
-            <strong>{v.sign}{sc(flatConfirm)} Nifty points</strong> from the 9:16 entry. Adverse stop:{" "}
+            <strong>{v.sign}{sc(flatConfirm)} Nifty points</strong> from the 9:16 entry. A minute that runs{" "}
+            <strong>25 pts against its own open</strong> is a loss. Adverse stop:{" "}
             <strong>{variant === "green" ? "9:17" : "9:26"} if 40 pts against</strong> and the target has not hit.
           </>
         ) : secondCandleFlatExits ? (
@@ -828,12 +897,11 @@ function Hybrid916BacktestSection({
             When <strong>9:16 open {v.confirmCmp} 9:15 close</strong> (both candles {v.colour}), take profit is a
             flat <strong>{v.sign}{sc(flatConfirm)} Nifty points</strong> from the 9:16 entry. When{" "}
             <strong>9:16 {v.gapVerb}</strong> {v.gapWhere} the 9:15 close ({v.opposite} second candle), take
-            profit is a flat <strong>{v.sign}{sc(flatGap)} Nifty points</strong> from entry. Adverse stop replaces
-            the 10:00 ±30 exit: <strong>red at 9:26 if 40 pts against</strong>,{" "}
+            profit is a flat <strong>{v.sign}{sc(flatGap)} Nifty points</strong> from entry. A minute that runs{" "}
+            <strong>25 pts against its own open</strong> is a loss, filled at that open ± 25, even if the target
+            prints later. The checkpoint stop remains: <strong>red at 9:26 if 40 pts against</strong>,{" "}
             <strong>green at 9:17 if 40 pts against</strong>, and only when the target has not hit yet. A target
-            touch on that same minute still counts as a win. <strong>9:17 opposite-body exit:</strong> if the 9:16
-            body points the other way and is at least as big as the 9:15 body (and the target did not hit inside
-            9:16), the trade closes at the 9:17 open — a win only if that open is in profit.
+            touch on that same minute still counts as a win when it is closer to the open than the 25-pt minute stop.
           </>
         ) : (
           <>
@@ -910,16 +978,18 @@ function Hybrid916BacktestSection({
               bothSameOnly ? (
                 <>
                   flat {v.sign}
-                  {sc(flatConfirm)} from 9:16 entry (both candles {v.colour}). If the 40-pt stop does not
-                  fire, a return to the 9:16 open or the flat target later in the session also wins.
+                  {sc(flatConfirm)} from 9:16 entry (both candles {v.colour}). A 25-pt adverse minute before
+                  that target is a loss. If the 40-pt stop does not fire, a return to the 9:16 open or the
+                  flat target later in the session also wins.
                 </>
               ) : (
                 <>
                   flat {v.sign}
                   {sc(flatConfirm)} from 9:16 when 9:16 open {v.confirmCmp} 9:15 close, or flat {v.sign}
                   {sc(flatGap)} when 9:16 {v.gapVerb} {v.gapWhere} the 9:15 close. The hit only counts if it prints
-                  before the adverse stop ({variant === "green" ? "9:17 · 40 pts against" : "9:26 · 40 pts against"}
-                  ). If the stop does not fire, a return to the 9:16 open or the same flat target later
+                  before a 25-pt adverse minute and before the checkpoint stop (
+                  {variant === "green" ? "9:17 · 40 pts against" : "9:26 · 40 pts against"}
+                  ). If neither stop fires, a return to the 9:16 open or the same flat target later
                   in the session also counts as a win (including after 10:00 AM).
                 </>
               )
@@ -933,10 +1003,11 @@ function Hybrid916BacktestSection({
         }
         lossIntro={
           <>
-            {variant === "green" ? "Green exits at 9:17" : "Red exits at 9:26"} when that minute&apos;s
-            open is ≥40 pts against the 9:16 entry (difference uses that open). If the stop does not
-            fire, a later return to the 9:16 open or the flat target hit counts as a win (see win table);
-            otherwise the row shows 15:30.
+            A minute that runs 25 pts against the trade from that minute&apos;s open is a loss (difference
+            uses the open ± 25). {variant === "green" ? "Green also exits at 9:17" : "Red also exits at 9:26"}{" "}
+            when that minute&apos;s open is ≥40 pts against the 9:16 entry. If neither stop fires, a later
+            return to the 9:16 open or the flat target hit counts as a win (see win table); otherwise the
+            row shows 15:30.
           </>
         }
         winHeading={`Winning trades — ${v.colour} 9:15 · ${v.side} @ 9:16`}
