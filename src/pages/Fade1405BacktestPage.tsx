@@ -160,9 +160,10 @@ export default function Fade1405BacktestPage() {
       const res = await fetch(`/api/kite/fade-1405-backtest${qs}`, { credentials: "include" });
       const json = (await res.json()) as { data?: Fade1405BacktestResult; error?: string };
       if (!res.ok || !json.data) throw new Error(json.error ?? "Backtest failed");
-      if (json.data.sessions < activeWindow.sessions) {
+      // Rolling ~365 calendar days from Kite — complete NSE sessions are often ~245–252, not exactly 252.
+      if (json.data.sessions < 200) {
         throw new Error(
-          `Only ${json.data.sessions} sessions loaded (need ${activeWindow.sessions}) — hit Refresh to rebuild`,
+          `Only ${json.data.sessions} sessions in cache — connect Kite and hit Refresh to rebuild history`,
         );
       }
       setData(json.data);
@@ -190,7 +191,7 @@ export default function Fade1405BacktestPage() {
               14:05 fade backtesting
             </h1>
             <p className="page-subtitle">
-              Nifty 50 · trend-day fade at 14:06 · Zerodha Kite minute data · {activeWindow.label}
+              Nifty 50 · trend-day fade at 14:06 · Zerodha Kite minute data · rolling {activeWindow.label}
               {data ? ` · ${data.from} → ${data.to} · ${data.sessions} sessions` : ""}
             </p>
           </div>

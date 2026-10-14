@@ -549,26 +549,6 @@
   font-size: 0.875rem;
 }
 
-.ns916-stat-tp-order--live {
-  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
-}
-
-.ns916-stat-tp-order--live .pat-stat-value {
-  color: var(--primary, #6366f1);
-}
-
-.ns916-stat-tp-order--partial .pat-stat-value {
-  color: #fbbf24;
-}
-
-.ns916-stat-tp-order--done .pat-stat-value {
-  color: var(--up, #4ade80);
-}
-
-.ns916-stat-tp-order--warn .pat-stat-value {
-  color: #fbbf24;
-}
-
 /* Rung-by-rung view of the Traps bot's take-profit / stop ladder. */
 .ms-bot-ladder {
   display: flex;

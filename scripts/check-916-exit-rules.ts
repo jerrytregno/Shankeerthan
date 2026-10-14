@@ -32,6 +32,12 @@ import {
   pnlPctOfEntryCost,
   shouldExitCapitalStopLoss,
   CAPITAL_STOP_LOSS_PCT,
+  armNineSixteenTrail,
+  stepNineSixteenTrail,
+  shouldExitNineSixteenTrail,
+  isPastNineSixteenTrailFlat,
+  nineSixteenFavourablePoints,
+  nineSixteenTrailSpot,
 } from "../server/nine-sixteen-logic.js";
 
 // 2026-08-18 is a Tuesday, 2026-08-19 a Wednesday.
@@ -237,3 +243,50 @@ console.log("−29.99 holds", ok(!shouldExitCapitalStopLoss(-29.99)));
 console.log("profit holds", ok(!shouldExitCapitalStopLoss(10)));
 console.log("unknown holds", ok(!shouldExitCapitalStopLoss(null)));
 console.log("entry 100 × 65, price 70 → −30%", ok(pnlPctOfEntryCost((70 - 100) * 65, 100, 65) === -30));
+
+console.log("\n--- 9:16 trail (lock target − 2 · stop = best 1-min close − 4 · flat 10:00) ---");
+console.log("PE favourable = entry − spot", ok(nineSixteenFavourablePoints(23_988, 24_000, "PE_BUY") === 12));
+console.log("CE favourable = spot − entry", ok(nineSixteenFavourablePoints(24_008, 24_000, "CE_BUY") === 8));
+{
+  const t12 = armNineSixteenTrail(12, 12.5, wed("09:20:10"));
+  console.log("12-pt target locks 10", ok(t12.floorPoints === 10 && t12.stopPoints === 10));
+  console.log("8-pt target locks 6", ok(armNineSixteenTrail(8, 8, wed("09:16:20")).stopPoints === 6));
+  console.log("6-pt target locks 4", ok(armNineSixteenTrail(6, 6, wed("09:17:05")).stopPoints === 4));
+  console.log("PE stop level is entry − 10", ok(nineSixteenTrailSpot(t12.stopPoints, 24_000, "PE_BUY") === 23_990));
+  console.log("CE stop level is entry + 10", ok(nineSixteenTrailSpot(t12.stopPoints, 24_000, "CE_BUY") === 24_010));
+
+  // Inside the arming minute the stop stays at the floor whatever the high.
+  let t = t12;
+  for (const [time, pts] of [
+    ["09:20:20", 13],
+    ["09:20:40", 19],
+    ["09:20:59", 14],
+  ] as const) {
+    t = stepNineSixteenTrail(t, pts, wed(time));
+  }
+  console.log("no ratchet inside the minute (high 19)", ok(t.stopPoints === 10 && t.bestClosePoints === 12));
+  console.log("dip to 10.5 inside the minute holds", ok(!shouldExitNineSixteenTrail(t, 10.5)));
+
+  // 9:20 closed at 14 → stop max(10, 14 − 4) = 10.
+  t = stepNineSixteenTrail(t, 13.5, wed("09:21:00.200"));
+  console.log("9:20 close 14 → best 14, stop stays 10", ok(t.bestClosePoints === 14 && t.stopPoints === 10));
+  t = stepNineSixteenTrail(t, 18, wed("09:21:30"));
+  t = stepNineSixteenTrail(t, 19.2, wed("09:21:59"));
+  // 9:21 closed at 19.2 → stop 15.2.
+  t = stepNineSixteenTrail(t, 16, wed("09:22:00.100"));
+  console.log("9:21 close 19.2 → stop 15.2", ok(Math.abs(t.stopPoints - 15.2) < 1e-9));
+  console.log("15.25 holds", ok(!shouldExitNineSixteenTrail(t, 15.25)));
+  console.log("15.2 exits", ok(shouldExitNineSixteenTrail(t, 15.2)));
+
+  // A lower close never lowers the stop.
+  t = stepNineSixteenTrail(t, 15.5, wed("09:22:59"));
+  t = stepNineSixteenTrail(t, 15.6, wed("09:23:00.100"));
+  console.log("lower 9:22 close keeps stop 15.2", ok(Math.abs(t.stopPoints - 15.2) < 1e-9 && t.bestClosePoints === 19.2));
+
+  // A gap of several minutes uses the last print before it as that minute's close.
+  t = stepNineSixteenTrail(t, 30, wed("09:23:40"));
+  t = stepNineSixteenTrail(t, 29, wed("09:27:00.050"));
+  console.log("close 30 after a quiet spell → stop 26", ok(t.stopPoints === 26));
+}
+console.log("flat at 09:59:59 holds", ok(!isPastNineSixteenTrailFlat(wed("09:59:59"))));
+console.log("flat at 10:00:00 exits", ok(isPastNineSixteenTrailFlat(wed("10:00:00"))));

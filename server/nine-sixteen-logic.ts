@@ -949,6 +949,91 @@ export function getHybrid916AdverseScheduleLabel(leg: TradeLeg): string {
   return "";
 }
 
+/** Nifty points under the 9:16 target that stay locked once the target is touched (12 → 10, 8 → 6, 6 → 4). */
+export const NINE_SIXTEEN_TRAIL_LOCK_BELOW_TARGET = 2;
+/** The 9:16 trail stop sits this many Nifty points behind the best 1-minute close since the touch. */
+export const NINE_SIXTEEN_TRAIL_POINTS = 4;
+/** A 9:16 trade still trailing at 10:00:00 IST is sold at market. */
+export const NINE_SIXTEEN_TRAIL_FLAT_SEC = 10 * 3600;
+
+/**
+ * 9:16 trailing profit. Every level is in Nifty points from the entry spot in the trade's favour
+ * (PE: entry − spot · CE: spot − entry). The stop only moves when a minute closes, so a pullback
+ * inside the minute of the touch cannot ratchet it.
+ */
+export interface NineSixteenTrail {
+  /** Index target that armed the trail (12, 8 or 6). */
+  targetPoints: number;
+  floorPoints: number;
+  /** Best completed 1-minute close since the touch; starts at the target. */
+  bestClosePoints: number;
+  stopPoints: number;
+  /** IST minute of day of the latest print folded in. */
+  minute: number;
+  /** Latest print — that minute's close once a later minute starts. */
+  lastPoints: number;
+  armedAtMs: number;
+}
+
+export function nineSixteenFavourablePoints(spot: number, entrySpot: number, leg: TradeLeg): number {
+  return leg === "CE_BUY" ? spot - entrySpot : entrySpot - spot;
+}
+
+/** Nifty level for a trail level given in favourable points. */
+export function nineSixteenTrailSpot(points: number, entrySpot: number, leg: TradeLeg): number {
+  return leg === "CE_BUY" ? entrySpot + points : entrySpot - points;
+}
+
+export function armNineSixteenTrail(
+  targetPoints: number,
+  favourablePoints: number,
+  nowMs = Date.now(),
+): NineSixteenTrail {
+  const floorPoints = targetPoints - NINE_SIXTEEN_TRAIL_LOCK_BELOW_TARGET;
+  return {
+    targetPoints,
+    floorPoints,
+    bestClosePoints: targetPoints,
+    stopPoints: Math.max(floorPoints, targetPoints - NINE_SIXTEEN_TRAIL_POINTS),
+    minute: istMinuteOfDay(nowMs),
+    lastPoints: favourablePoints,
+    armedAtMs: nowMs,
+  };
+}
+
+/** Fold in one Nifty print; the first print of a new minute ratchets the stop off the previous close. */
+export function stepNineSixteenTrail(
+  trail: NineSixteenTrail,
+  favourablePoints: number,
+  nowMs = Date.now(),
+): NineSixteenTrail {
+  const minute = istMinuteOfDay(nowMs);
+  if (minute <= trail.minute) return { ...trail, lastPoints: favourablePoints };
+  const bestClosePoints = Math.max(trail.bestClosePoints, trail.lastPoints);
+  return {
+    ...trail,
+    bestClosePoints,
+    stopPoints: Math.max(trail.stopPoints, bestClosePoints - NINE_SIXTEEN_TRAIL_POINTS),
+    minute,
+    lastPoints: favourablePoints,
+  };
+}
+
+export function shouldExitNineSixteenTrail(trail: NineSixteenTrail, favourablePoints: number): boolean {
+  return favourablePoints <= trail.stopPoints + 1e-9;
+}
+
+export function isPastNineSixteenTrailFlat(nowMs = Date.now()): boolean {
+  return istSecondsOfDay(new Date(nowMs)) >= NINE_SIXTEEN_TRAIL_FLAT_SEC;
+}
+
+export function getNineSixteenTrailScheduleLabel(): string {
+  return (
+    `Nifty target touch locks target − ${NINE_SIXTEEN_TRAIL_LOCK_BELOW_TARGET} · stop rises to best 1-min close − ` +
+    `${NINE_SIXTEEN_TRAIL_POINTS} · market sell on the stop · flat 10:00`
+  );
+}
+
 function pnlExitStartMinuteOfDay(): number {
   return NINE_SIXTEEN_PNL_MORNING_EXIT_START_MINUTE;
 }
@@ -1292,7 +1377,10 @@ export function shouldExitNineFifteenTakeProfit(
   return target > 0 && unrealisedPnl + 1e-9 >= target;
 }
 
-/** Same take-profit market-backup test used by the 9:16 leg (weekday % from {@link getNineSixteenTakeProfitPct}). */
+/**
+ * @deprecated The live 9:16 leg no longer has a take-profit or market backup — it exits on the
+ * Nifty trail. Kept for scripts/check-916-trailing-pnl.ts.
+ */
 export function shouldExitNineSixteenTakeProfit(
   unrealisedPnl: number | null,
   entryPrice: number,
@@ -1314,7 +1402,14 @@ export function nineFifteenPnlRemainingToTarget(
   return Math.max(0, target - unrealisedPnl);
 }
 
-export type NineFifteenExitVia = "limit" | "market" | "trail-stop" | "hard-stop" | "capital-stop" | "eod";
+export type NineFifteenExitVia =
+  | "limit"
+  | "market"
+  | "trail-stop"
+  | "hard-stop"
+  | "capital-stop"
+  | "eod"
+  | "flat-on-kite";
 
 /** Human-readable close line for logs and the panel after a 9:15 / 9:16 take-profit leg exits. */
 export function formatNineFifteenExitSummary(input: {
@@ -1343,7 +1438,9 @@ export function formatNineFifteenExitSummary(input: {
             ? "hard stop (market)"
             : input.via === "capital-stop"
               ? `capital stop −${CAPITAL_STOP_LOSS_PCT}% of deployed capital (market)`
-              : "end-of-day square-off (market)";
+              : input.via === "flat-on-kite"
+                ? "position already flat on Kite (closed outside the bot)"
+                : "end-of-day square-off (market)";
   const parts = [
     `TRADE EXITED · ${legTag} ${viaLabel}`,
     `${input.quantity} qty`,
@@ -1422,6 +1519,9 @@ export const NINE_SIXTEEN_TAKE_PROFIT_PCT_EARLY = 5;
 export const NINE_SIXTEEN_CE_TAKE_PROFIT_PCT = 3;
 
 /**
+ * @deprecated The live 9:16 leg now exits on the Nifty trail ({@link armNineSixteenTrail}), not a
+ * limit sell. Kept for scripts/check-916-trailing-pnl.ts.
+ *
  * 9:16 limit-sell % on deployed capital. Same for PE and CE.
  * Same colour = 9:16:00 open keeps the 9:15 colour; different colour = open gaps against it.
  */
@@ -1451,17 +1551,16 @@ export function getNineSixteenLadderLabel(
   leg?: TradeLeg | null,
   sameColor?: boolean,
 ): string {
-  const known = sameColor === true || sameColor === false;
-  const tpBit = known
-    ? `+${getNineSixteenTakeProfitPct(dateIst, sameColor)}% take-profit limit (${sameColor ? "9:16 same colour as 9:15" : "9:16 different colour from 9:15"})`
-    : `take-profit limit ${describeNineSixteenTakeProfitSchedule()}`;
+  void dateIst;
+  void sameColor;
   const sign = leg === "CE_BUY" ? "+" : "−";
   const adverse =
     leg === "CE_BUY" || leg === "PE_BUY"
       ? getHybrid916AdverseScheduleLabel(leg)
       : `hard stop ±${NINE_SIXTEEN_HARD_STOP_INDEX_POINTS} from ${getHardStopStartLabel()}`;
   return (
-    `${tpBit} on capital deployed · parallel flat ${sign}${NINE_SIXTEEN_HYBRID_INDEX_TARGET_RED_CONFIRM}/${sign}${NINE_SIXTEEN_HYBRID_INDEX_TARGET_GREEN_GAP} Nifty index exit (market) · ${adverse} · 3:25 PM square-off`
+    `no limit sell · Nifty target ${sign}${NINE_SIXTEEN_HYBRID_INDEX_TARGET_RED_CONFIRM}/${sign}${NINE_SIXTEEN_HYBRID_INDEX_TARGET_GREEN_GAP} ` +
+    `starts the trail (${getNineSixteenTrailScheduleLabel()}) · until then ${adverse} · 3:25 PM square-off`
   );
 }
 

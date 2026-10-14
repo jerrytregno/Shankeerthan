@@ -11,7 +11,7 @@ import type { WinBacktestTrade } from "../src/types/win-backtest.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const META_FILE = path.join(__dirname, "..", "data", "fade-1405-backtest.meta.json");
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 
 function toTrade(row: WinBacktestTrade): Fade1405BacktestTrade {
   return {

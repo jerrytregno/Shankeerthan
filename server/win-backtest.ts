@@ -27,7 +27,8 @@ import {
   type MinuteBar,
 } from "./session-bars.js";
 
-const LOOKBACK_CALENDAR_DAYS = 365;
+/** Calendar span for Kite fetch — slightly over 365 so ~252 complete NSE sessions fit in the window. */
+const LOOKBACK_CALENDAR_DAYS = 380;
 const CHUNK_TRADING_DAYS = 25;
 const FETCH_SPACING_MS = 450;
 const DAY_MINS = 16 * 60;
@@ -35,7 +36,7 @@ const OPEN_MINS = 9 * 60 + 15;
 const MARK_929 = 9 * 60 + 29;
 const ENTRY_930 = 9 * 60 + 30;
 const FLAT_EXIT = 15 * 60 + 20;
-const CACHE_VERSION = 4;
+const CACHE_VERSION = 5;
 const CACHE_MS = 12 * 60 * 60 * 1000;
 
 const STOPS = [25, 30, 40];

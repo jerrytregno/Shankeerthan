@@ -303,6 +303,68 @@
   border: 1px solid color-mix(in srgb, #eab308 45%, var(--border));
 }
 
+.nf-trail-method {
+  margin: 0 0 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, #38bdf8 40%, var(--border));
+  background: color-mix(in srgb, #0ea5e9 10%, var(--card));
+}
+
+.nf-trail-method-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #7dd3fc;
+}
+
+.nf-trail-method-lead {
+  margin: 0 0 0.55rem;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.nf-trail-method-steps {
+  margin: 0 0 0.65rem;
+  padding-left: 1.15rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.nf-trail-method-steps li + li {
+  margin-top: 0.4rem;
+}
+
+.nf-trail-method-table-wrap {
+  overflow-x: auto;
+  margin-bottom: 0.5rem;
+}
+
+.nf-trail-method-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.nf-trail-method-table th,
+.nf-trail-method-table td {
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  border: 1px solid var(--border);
+}
+
+.nf-trail-method-table th {
+  font-weight: 600;
+  background: color-mix(in srgb, var(--border) 35%, transparent);
+}
+
+.nf-trail-method-note {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
 .nf-inline-code {
   font-size: 0.75em;
   padding: 0.1em 0.35em;
