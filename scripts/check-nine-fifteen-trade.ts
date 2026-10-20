@@ -26,6 +26,7 @@ import {
   NINE_FIFTEEN_FLIP_916_EXIT_SEC,
   isNineFifteenFlip916ExitWindow,
   shouldNineFifteenFlip916Exit,
+  shouldExitNineFifteenBackThroughOpen,
   isNiftyMovedOppositeFor916Flip,
   NINE_SIXTEEN_MIN_915_ABS_DIFF,
   isPastNineFifteenMarginRetryWindow,
@@ -78,16 +79,17 @@ check("red with 10 pt drop buys the PE", decideNineFifteenEntry(24_800, 24_790),
   movePts: 10,
 });
 check(
-  "a one-paisa fall is too small — need at least 5 pts",
+  "a one-paisa fall is too small — need at least 10 pts",
   decideNineFifteenEntry(24_800, 24_799.95).action,
   "skip",
 );
-check("exactly 5 pts down enters", decideNineFifteenEntry(24_800, 24_795), {
+check("exactly 10 pts down enters", decideNineFifteenEntry(24_800, 24_790), {
   action: "enter",
   leg: "PE_BUY",
-  movePts: 5,
+  movePts: 10,
 });
-check("4.9 pts down is skipped", decideNineFifteenEntry(24_800, 24_795.1).action, "skip");
+check("exactly 5 pts down is skipped", decideNineFifteenEntry(24_800, 24_795).action, "skip");
+check("9.9 pts down is skipped", decideNineFifteenEntry(24_800, 24_790.1).action, "skip");
 check("green with 10 pt rise buys CE", decideNineFifteenEntry(24_800, 24_810), {
   action: "enter",
   leg: "CE_BUY",
@@ -148,6 +150,12 @@ check(
   isNiftyMovedOppositeFor916Flip("CE_BUY", 100, 100 - NINE_SIXTEEN_MIN_915_ABS_DIFF),
   true,
 );
+check("PE exits when Nifty is above the 9:15 open", shouldExitNineFifteenBackThroughOpen("PE_BUY", 22671.3, 22671.35), true);
+check("PE holds at the 9:15 open", shouldExitNineFifteenBackThroughOpen("PE_BUY", 22671.3, 22671.3), false);
+check("PE holds below the 9:15 open", shouldExitNineFifteenBackThroughOpen("PE_BUY", 22671.3, 22650), false);
+check("CE exits when Nifty is below the 9:15 open", shouldExitNineFifteenBackThroughOpen("CE_BUY", 22671.3, 22671.25), true);
+check("CE holds at the 9:15 open", shouldExitNineFifteenBackThroughOpen("CE_BUY", 22671.3, 22671.3), false);
+check("CE holds above the 9:15 open", shouldExitNineFifteenBackThroughOpen("CE_BUY", 22671.3, 22690), false);
 check("flip when not in profit", shouldNineFifteenFlip916Exit("PE_BUY", 100, 120, -500), true);
 check("no flip when in profit", shouldNineFifteenFlip916Exit("PE_BUY", 100, 120, 1), false);
 check("no flip when move too small", shouldNineFifteenFlip916Exit("PE_BUY", 100, 110, -500), false);
@@ -267,7 +275,7 @@ console.log("\n--- buys are NRML MARKET at the print; only sells are LIMIT ---")
 }
 
 console.log("\n--- 9:15 entry minimum move ---");
-check("minimum red move is 5 pts", NINE_FIFTEEN_MIN_DROP_PTS, 5);
+check("minimum red move is 10 pts", NINE_FIFTEEN_MIN_DROP_PTS, 10);
 check("minimum green move is 10 pts", NINE_FIFTEEN_MIN_RISE_PTS, 10);
 
 console.log("\n--- the 9:16 trade: red → PE · green → CE (|Δ| ≥ 15) ---");

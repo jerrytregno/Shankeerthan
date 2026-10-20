@@ -73,8 +73,9 @@ import {
   is915BodyBelowMinPts,
   isNineFifteenFlip916ExitWindow,
   shouldNineFifteenFlip916Exit,
+  shouldExitNineFifteenBackThroughOpen,
   NINE_SIXTEEN_MIN_915_ABS_DIFF,
-  NINE_FIFTEEN_MIN_DROP_PTS,
+  NINE_FIFTEEN_SMALL_BODY_PTS,
   NINE_FIFTEEN_TAKE_PROFIT_PCT,
   NINE_FIFTEEN_TAKE_PROFIT_PCT_AT_91540,
   getNineFifteenTakeProfitPct,
@@ -1642,6 +1643,12 @@ function handleBotTick(tick: NiftyTick) {
     if (tradeSlot === "nine-fifteen" && phase === "in_position") {
       const sessionFlip = loadKiteSession();
       if (sessionFlip?.accessToken) {
+        void maybeNineFifteenOpenReclaimExit(sessionFlip.accessToken).catch((err) => {
+          pushLog(
+            `9:15 open stop failed · ${err instanceof Error ? err.message : "unknown"}`,
+            "warning",
+          );
+        });
         void maybeNineFifteenFlip916Exit(sessionFlip.accessToken, dateIst, tick.receivedAtMs).catch(
           (err) => {
             pushLog(
@@ -1765,13 +1772,13 @@ function maybeArmNineFifteenSmallBodyExit(dateIst: string) {
   nineFifteenSmallBodyExitArmed = true;
   const delta = capturedClose915 - capturedOpen915;
   pushLog(
-    `9:15 WS close |Δ| ${Math.abs(delta).toFixed(2)} < ${NINE_FIFTEEN_MIN_DROP_PTS} · ` +
+    `9:15 WS close |Δ| ${Math.abs(delta).toFixed(2)} < ${NINE_FIFTEEN_SMALL_BODY_PTS} · ` +
       `open ${capturedOpen915.toFixed(2)} · close ${capturedClose915.toFixed(2)} · ` +
       `9:15 leg will exit on the first Nifty WS tick at 9:16:00 (any P&L)`,
     "warning",
   );
   message =
-    `9:15 |Δ| ${Math.abs(delta).toFixed(2)} < ${NINE_FIFTEEN_MIN_DROP_PTS} at WS close · ` +
+    `9:15 |Δ| ${Math.abs(delta).toFixed(2)} < ${NINE_FIFTEEN_SMALL_BODY_PTS} at WS close · ` +
     `waiting for 9:16:00 WS tick to exit`;
   saveBotState(dateIst);
 }
@@ -1821,7 +1828,7 @@ async function maybeNineFifteenSmallBodyExitOnWsTick(
     await cancelLegTakeProfitOrders(accessToken);
     await squareOff(
       accessToken,
-      `9:15 small-body exit @ 9:16:00 · Nifty WS tick @ ${tickLabel} · |Δ| ${absDelta.toFixed(2)} < ${NINE_FIFTEEN_MIN_DROP_PTS} · market sell (any P&L)`,
+      `9:15 small-body exit @ 9:16:00 · Nifty WS tick @ ${tickLabel} · |Δ| ${absDelta.toFixed(2)} < ${NINE_FIFTEEN_SMALL_BODY_PTS} · market sell (any P&L)`,
     );
     return true;
   } finally {
@@ -2940,7 +2947,7 @@ function armNineFifteenTpRetargetTimer() {
 }
 
 /**
- * The 9:15 trade: read the minute ten seconds in and buy ATM PE on red ≥ 5 pts at 9:15:11.
+ * The 9:15 trade: read the minute ten seconds in and buy ATM PE on red ≥ 10 pts at 9:15:11.
  *
  * Nothing in here ends the day. Whether it trades, skips or fails to fill, the 9:16 decision is
  * still taken at 9:16:01 — the only thing that stops it is this leg still being open by then.
@@ -3642,7 +3649,32 @@ async function maybeHybrid916AdverseAndEntryExit(
 }
 
 let nineFifteenTrailExitInFlight = false;
+let nineFifteenOpenStopInFlight = false;
 let nineFifteenFlip916ExitInFlight = false;
+
+/** Sell the 9:15 leg the moment Nifty crosses back through that day's 9:15 open. */
+async function maybeNineFifteenOpenReclaimExit(accessToken: string): Promise<boolean> {
+  if (nineFifteenOpenStopInFlight || squareOffInFlight) return false;
+  if (tradeSlot !== "nine-fifteen" || phase !== "in_position") return false;
+  if (leg !== "PE_BUY" && leg !== "CE_BUY") return false;
+  const open =
+    capturedOpen915 != null && capturedOpen915 > 0 ? capturedOpen915 : open915 > 0 ? open915 : 0;
+  if (!(open > 0) || lastSpot == null || !(lastSpot > 0)) return false;
+  if (!shouldExitNineFifteenBackThroughOpen(leg, open, lastSpot)) return false;
+
+  nineFifteenOpenStopInFlight = true;
+  try {
+    const side = leg === "PE_BUY" ? "PE" : "CE";
+    const cmp = leg === "PE_BUY" ? "above" : "below";
+    await squareOff(
+      accessToken,
+      `9:15 open stop · ${side} · Nifty ${lastSpot.toFixed(2)} is ${cmp} the 9:15 open ${open.toFixed(2)} · market sell`,
+    );
+    return true;
+  } finally {
+    nineFifteenOpenStopInFlight = false;
+  }
+}
 
 async function maybeNineFifteenFlip916Exit(
   accessToken: string,
@@ -3854,7 +3886,7 @@ async function maybeNineSixteenMinuteSpikeExit(accessToken: string): Promise<boo
 }
 
 /**
- * Nifty-only exits (9:16 minute spike, trail, 9:26/9:17 adverse stop, entry return, 9:15 10:00 stop)
+ * Nifty-only exits (9:15 open stop, 9:16 minute spike, trail, 9:26/9:17 adverse stop, entry return, 9:15 10:00 stop)
  * read websocket state first so a stalled Kite REST call cannot delay them.
  */
 async function maybeNiftyDrivenExit(
@@ -3865,6 +3897,7 @@ async function maybeNiftyDrivenExit(
   if (phase !== "in_position" || squareOffInFlight) return false;
   if (tradeSlot === "fade-1405") return false;
   if (tradeSlot === "nine-fifteen") {
+    if (await maybeNineFifteenOpenReclaimExit(accessToken)) return true;
     if (await maybeNineFifteenFlip916Exit(accessToken, dateIst, nowMs)) return true;
     return maybeHardStopExit(accessToken);
   }
@@ -4903,7 +4936,7 @@ export function startNineSixteenBot() {
   startNineSixteenLiveMonitor();
   startNineSixteenMonitorLoop();
   pushLog(
-    "9:15 + 9:16 trading armed on startup — 9:15: red ≥ 5 pts → PE · green ≥ 10 pts → CE at 9:15:11 · 9:16: |Δ| ≥ 15 · red → PE · green → CE at 9:16:01",
+    "9:15 + 9:16 trading armed on startup — 9:15: red ≥ 10 pts → PE · green ≥ 10 pts → CE at 9:15:11 · 9:16: |Δ| ≥ 15 · red → PE · green → CE at 9:16:01",
     "info",
   );
 }

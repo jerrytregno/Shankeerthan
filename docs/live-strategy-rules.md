@@ -14,7 +14,7 @@ The server runs two independent morning trades on the same bot, plus an optional
 |---|---|---|---|
 | What it reads | The first 10 seconds of the 9:15 minute | The full 9:15 minute (open to close) | 14:05 close vs 9:15 open + range vs yesterday |
 | When it buys | 9:15:11 | 9:16:01 | 14:06 (first tick in window) |
-| Signal | Red ≥ 5 / green ≥ 10 vs open | Red/green ≥ 15 on 9:15 candle | 100+ from open **and** today’s range through 14:05 > yesterday full range → **fade** |
+| Signal | Red ≥ 10 / green ≥ 10 vs open | Red/green ≥ 15 on 9:15 candle | 100+ from open **and** today’s range through 14:05 > yesterday full range → **fade** |
 | Order type | Market buy | Market buy | Market buy |
 | Main exit | Trailing P&amp;L ladder on option | Take-profit limit + Nifty index exit | **Nifty index trail** (25 / 5 / 4 / 10) |
 
@@ -61,21 +61,21 @@ The bot compares the mark (last tick before 9:15:10) with the open:
 
 | Read at 9:15:10 | Rule | Result |
 |---|---|---|
-| Red, drop ≥ 5 points | open − mark ≥ 5 | Buy ATM **PE** at 9:15:11 |
+| Red, drop ≥ 10 points | open − mark ≥ 10 | Buy ATM **PE** at 9:15:11 |
 | Green, rise ≥ 10 points | mark − open ≥ 10 | Buy ATM **CE** at 9:15:11 |
-| Red but drop < 5 | | No 9:15 trade |
+| Red but drop < 10 | | No 9:15 trade |
 | Green but rise < 10 | | No 9:15 trade |
 | Flat (mark = open) | | No 9:15 trade |
 
-Note that green needs a bigger move (10 points) than red (5 points).
+Red and green both need a 10-point move.
 
 > Examples (open = 24,000.00):
 >
 > | Mark (last tick before 9:15:10) | Move | Decision |
 > |---|---|---|
-> | 23,993.50 | Red by 6.50 | **Buy PE** |
-> | 23,995.00 | Red by exactly 5.00 | **Buy PE** (5 is enough) |
-> | 23,996.00 | Red by 4.00 | No trade |
+> | 23,989.50 | Red by 10.50 | **Buy PE** |
+> | 23,990.00 | Red by exactly 10.00 | **Buy PE** (10 is enough) |
+> | 23,993.50 | Red by 6.50 | No trade |
 > | 24,011.20 | Green by 11.20 | **Buy CE** |
 > | 24,010.00 | Green by exactly 10.00 | **Buy CE** (10 is enough) |
 > | 24,007.00 | Green by 7.00 | No trade (green needs 10) |
@@ -160,6 +160,19 @@ Why: the trade was bought because of the move at 9:15:10. If the full minute clo
 It applies the same way to CE trades; only the size of the body matters, not its direction.
 
 When this exit is armed, the 9:16 trade is not marked as skipped, because the 9:15 trade is being closed at 9:16:01 anyway. In every other case where the 9:15 trade is still open at 9:16:00, the 9:16 trade is skipped for the day.
+
+### 1.10.1 Exit: back through the 9:15 open
+
+After the 9:15 fill, every Nifty websocket tick is compared with that day's 9:15 open (the first tick of the 9:15 minute).
+
+- **PE:** market sell the moment Nifty trades above the 9:15 open
+- **CE:** market sell the moment Nifty trades below the 9:15 open
+
+A tick exactly at the open does not exit. This runs from the fill onward, alongside the trailing P&L ladder.
+
+> Example (PE): 9:15 open 22,671.30. The 10-second read is red, so the bot buys a put. If a later tick is 22,671.35, the put is sold at market. A tick at 22,671.30 holds.
+>
+> Example (CE): 9:15 open 22,671.30. The bot buys a call. If a later tick is 22,671.25, the call is sold at market.
 
 ### 1.11 Exit 4: hard stop (from 10:00 AM)
 
@@ -386,7 +399,7 @@ There is **no** 9:16-style take-profit limit or ±12/±8 index target on this le
 | | 9:15 trade | 9:16 trade | 14:05 fade |
 |---|---|---|---|
 | Signal | 9:15:10 read vs open | Full 9:15 candle Δ | 14:05 close + range vs yesterday |
-| Red threshold | ≥ 5 points → PE | ≥ 15 points → PE | 100+ below open → CE (fade) |
+| Red threshold | ≥ 10 points → PE | ≥ 15 points → PE | 100+ below open → CE (fade) |
 | Green threshold | ≥ 10 points → CE | ≥ 15 points → CE | 100+ above open → PE (fade) |
 | Entry time | 9:15:11 (order ~9:15:12) | 9:16:01 | ~14:06 |
 | Entry order | Market buy | Market buy (latest WS price + 3% sizing cushion) | Market buy |

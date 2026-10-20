@@ -127,11 +127,13 @@ export const NINE_SIXTEEN_PRE_RESOLVE_SEC = 9 * 3600 + 15 * 60 + 58;
 /**
  * The 9:15 trade — a separate, earlier leg that runs before the 9:16 one.
  *
- * The 9:15 minute is read ten seconds in: red ≥ 5 pts → ATM PE · green ≥ 10 pts → ATM CE at 9:15:11.
+ * The 9:15 minute is read ten seconds in: red ≥ 10 pts → ATM PE · green ≥ 10 pts → ATM CE at 9:15:11.
  */
 export const NINE_FIFTEEN_PRE_RESOLVE_SEC = 9 * 3600 + 15 * 60 + 4;
 /** Minimum drop (open − mark) at 9:15:10 to arm the 9:15:11 PE entry. */
-export const NINE_FIFTEEN_MIN_DROP_PTS = 5;
+export const NINE_FIFTEEN_MIN_DROP_PTS = 10;
+/** 9:15 candle |close − open| below this arms the 9:16:00 small-body exit. Not the entry filter. */
+export const NINE_FIFTEEN_SMALL_BODY_PTS = 5;
 /** Minimum rise (mark − open) at 9:15:10 to arm the 9:15:11 CE entry. */
 export const NINE_FIFTEEN_MIN_RISE_PTS = 10;
 
@@ -154,6 +156,21 @@ export function isNiftyMovedOppositeFor916Flip(
   return false;
 }
 
+/**
+ * 9:15 open stop. After the fill, a put is done the moment Nifty trades back above the 9:15 open,
+ * and a call is done the moment Nifty trades back below it. A tick exactly at the open holds.
+ */
+export function shouldExitNineFifteenBackThroughOpen(
+  leg: TradeLeg | null,
+  open915: number,
+  spot: number,
+): boolean {
+  if (leg !== "PE_BUY" && leg !== "CE_BUY") return false;
+  if (!(open915 > 0) || !(spot > 0)) return false;
+  if (leg === "PE_BUY") return spot > open915 + 1e-9;
+  return spot < open915 - 1e-9;
+}
+
 /** Early 9:15 exit to free the 9:16 slot — not in profit and Nifty flipped ≥15 vs open. */
 export function shouldNineFifteenFlip916Exit(
   leg: TradeLeg | null,
@@ -169,7 +186,7 @@ export function shouldNineFifteenFlip916Exit(
 export function is915BodyBelowMinPts(
   open: number,
   close: number,
-  minPts = NINE_FIFTEEN_MIN_DROP_PTS,
+  minPts = NINE_FIFTEEN_SMALL_BODY_PTS,
 ): boolean {
   if (!(open > 0) || !(close > 0)) return false;
   return Math.abs(close - open) + 1e-9 < minPts;

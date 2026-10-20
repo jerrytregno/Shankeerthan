@@ -396,12 +396,12 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
               9:15:10 read {formatNumber(status.nineFifteenMarkPrice, 2)} against the open{" "}
               {formatNumber(status.open915 ?? 0, 2)} · Δ {nineFifteenMarkChange >= 0 ? "+" : ""}
               {formatNumber(nineFifteenMarkChange, 2)} pts —{" "}
-              {nineFifteenMarkChange <= -5
-                ? "red ≥ 5 pts, buying the ATM PE"
+              {nineFifteenMarkChange <= -10
+                ? "red ≥ 10 pts, buying the ATM PE"
                 : nineFifteenMarkChange >= 10
                   ? "green ≥ 10 pts, buying the ATM CE"
                   : nineFifteenMarkChange < 0
-                    ? "red but under 5 pts, no 9:15 trade"
+                    ? "red but under 10 pts, no 9:15 trade"
                     : nineFifteenMarkChange === 0
                       ? "flat, no 9:15 trade"
                       : "green but under 10 pts, no 9:15 trade"}
@@ -473,6 +473,8 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                     ? ` · stop floor +${status.pnlLockedPct}%`
                     : ""}
                   . Hitting the target ratchets the ladder (does not exit); slip to the stop floor → market exit.{" "}
+                  <strong>9:15 open stop</strong> — PE market sell if Nifty goes above the 9:15 open, CE if Nifty
+                  goes below it.{" "}
                   {status.pnlExitSchedule ? <> Schedule: {status.pnlExitSchedule}.</> : null}{" "}
                   <strong>9:15:57 flip</strong> — not in profit and Nifty ≥15 pts against vs 9:15 open → market exit
                   for 9:16 (|Δ| ≥ 15 on sealed 9:15 candle).{" "}
@@ -1049,9 +1051,10 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
 
       <p className="pat-idle-note text-muted">
         <strong>9:15 trade</strong> (always on server): first tick at 9:15:00 = open; last tick before 9:15:10 vs
-        open — red ≥ <strong>5 pts</strong> → <strong>NRML market BUY</strong> ATM PE · green ≥ <strong>10 pts</strong>{" "}
+        open — red ≥ <strong>10 pts</strong> → <strong>NRML market BUY</strong> ATM PE · green ≥ <strong>10 pts</strong>{" "}
         → ATM CE at 9:15:11 (full balance, split <strong>25 lots</strong> per order). Exit:{" "}
         <strong>trailing P&amp;L</strong> on option WS ticks from <strong>+3%</strong> (ratchet · exit on stop floor);
+        <strong>open stop</strong> — PE if Nifty goes above the 9:15 open, CE if it goes below;
         from <strong>9:15:57</strong> if not in profit and Nifty ≥15 pts against vs open → market exit for{" "}
         <strong>9:16</strong>; if WS 9:15 close
         |Δ| &lt; 5 and still open → <strong>market exit on first Nifty WS tick @ 9:16:00</strong>;{" "}

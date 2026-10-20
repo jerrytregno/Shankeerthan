@@ -34,7 +34,7 @@ export default function NineFifteenPage() {
             <div className="nf-live-rules-col">
               <h3 className="nf-live-rules-heading">9:15 trade · PE or CE at 9:15:11</h3>
               <p className="nf-live-rules-lead text-muted">
-                Burst on the opening minute — red ≥ 5 pts → ATM PE · green ≥ 10 pts → ATM CE. Exit:{" "}
+                Burst on the opening minute — red ≥ 10 pts → ATM PE · green ≥ 10 pts → ATM CE. Exit:{" "}
                 <strong>trailing P&amp;L ladder</strong> on option LTP websocket ticks from{" "}
                 <strong>+3%</strong> (PE and CE) — ratchet targets, exit only on the locked stop floor.
               </p>
@@ -48,7 +48,7 @@ export default function NineFifteenPage() {
                   <strong>Read direction at 9:15:10</strong> — last tick strictly before 10 seconds vs that open.
                   <ul className="nf-live-rules-sublist">
                     <li>
-                      <strong>Red ≥ 5 pts</strong> (open − mark ≥ <strong>5</strong> at 9:15:10) →{" "}
+                      <strong>Red ≥ 10 pts</strong> (open − mark ≥ <strong>10</strong> at 9:15:10) →{" "}
                       <strong>ATM PE</strong> at <strong>9:15:11.000</strong>
                     </li>
                     <li>
@@ -56,7 +56,7 @@ export default function NineFifteenPage() {
                       <strong>ATM CE</strong> at <strong>9:15:11.000</strong>
                     </li>
                     <li>
-                      <strong>Red &lt; 5 pts</strong> or <strong>green &lt; 10 pts</strong> or flat → no 9:15 trade
+                      <strong>Red &lt; 10 pts</strong> or <strong>green &lt; 10 pts</strong> or flat → no 9:15 trade
                     </li>
                   </ul>
                 </li>
@@ -83,6 +83,12 @@ export default function NineFifteenPage() {
               </ol>
               <h4 className="nf-live-rules-subheading">Exit (trailing P&amp;L on option WS tick)</h4>
               <ol className="nf-live-rules-list">
+                <li>
+                  <strong>9:15 open stop</strong> — on every Nifty websocket tick after the fill,{" "}
+                  <strong>immediate market exit</strong> if Nifty crosses back through the{" "}
+                  <strong>9:15 open</strong> (first tick of that minute). <strong>PE</strong> when Nifty goes above
+                  the open. <strong>CE</strong> when Nifty goes below the open. A tick exactly at the open holds.
+                </li>
                 <li>
                   <strong>Trailing take-profit</strong> (% on <strong>capital deployed</strong> = entry premium ×
                   qty, not Nifty index %). On every option LTP websocket tick: first target{" "}
@@ -115,7 +121,7 @@ export default function NineFifteenPage() {
               </ol>
               <p className="nf-live-rules-foot text-muted">
                 When the 9:15 leg closes before 9:16:00, the 9:16 decision still runs at 9:16:00 unless the
-                9:15 trade is still open. If the 9:15 signal itself qualifies (red ≥ 5 or green ≥ 10 at the
+                9:15 trade is still open. If the 9:15 signal itself qualifies (red ≥ 10 or green ≥ 10 at the
                 10-second read), the buy goes out at <strong>9:15:11</strong>. A tick in the second before that
                 order is not a missed trade. If that order does not fill, the 9:16 decision still runs.
               </p>
