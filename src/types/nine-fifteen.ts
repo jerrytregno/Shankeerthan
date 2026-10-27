@@ -170,11 +170,11 @@ export interface NineFifteenCandleRow {
   /** Set when green 9:17 bar open is ≥40 pts against the 9:16 entry. */
   ceAdverseStopTouch?: NineFifteenAdverseStopTouch | null;
   /**
-   * First minute that runs 25 pts against its own open before the flat target (red / PE).
-   * Fill is that minute's open + 25. Null when the target prints first.
+   * First minute that runs 35 pts against its own open before the flat target (red / PE).
+   * Fill is that minute's open + 35. Null when the target prints first.
    */
   peMinuteSpikeStop?: NineFifteenAdverseStopTouch | null;
-  /** Green / CE mirror: fill is that minute's open − 25. */
+  /** Green / CE mirror: fill is that minute's open − 35. */
   ceMinuteSpikeStop?: NineFifteenAdverseStopTouch | null;
   /** First time at or after 9:26 that Nifty is back at the 9:16 open (red). */
   peReturnToEntryFrom926?: string | null;
@@ -507,7 +507,7 @@ export interface NineFifteenCePeFailureTrade {
   nrmlCarry?: NineFifteenNrmlCarryOutcome | null;
   /** At 10:00 IST: Nifty vs the session exit target (entry ± targetPoints). */
   targetGapAt1000?: NineFifteenTargetGapAtCheckpoint | null;
-  /** Set when a single minute ran 25 pts against its own open and that closed the trade. */
+  /** Set when a single minute ran 35 pts against its own open and that closed the trade. */
   minuteSpikeExit?: NineFifteenAdverseStopTouch | null;
   /** Set when the 9:26 red / 9:17 green 40-pt stop closed the trade. */
   adverseStopExit?: NineFifteenAdverseStopTouch | null;
@@ -580,6 +580,11 @@ export interface NineFifteenCePeStrategyStats {
   failures: NineFifteenCePeFailureTrade[];
   /** Full-day target hits with 9:15 bar detail (only populated for select rules). */
   successes: NineFifteenCePeFailureTrade[];
+  /**
+   * Same 9:16 book with the opposite minute exit turned off.
+   * Present on the hybrid 9:16 stats so the page can toggle it without another rebuild.
+   */
+  withoutMinuteSpike?: NineFifteenCePeStrategyStats;
 }
 
 /** Same strategy rows backtested at a different Nifty index target (e.g. 50 vs 100). */

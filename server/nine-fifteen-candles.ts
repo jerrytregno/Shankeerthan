@@ -53,6 +53,7 @@ import {
   NINE_SIXTEEN_MIN_915_ABS_DIFF,
   NINE_SIXTEEN_HYBRID_INDEX_TARGET_RED_CONFIRM,
   NINE_SIXTEEN_HYBRID_INDEX_TARGET_GREEN_GAP,
+  NINE_SIXTEEN_MINUTE_SPIKE_PTS as HYBRID916_MINUTE_SPIKE_PTS,
 } from "./nine-sixteen-logic.js";
 
 /** Backtest entry: Kite 9:16 candle open (real 1-min data). */
@@ -1116,8 +1117,6 @@ function adverseExitAtCheckpoint(
 const HYBRID916_ADVERSE_STOP_PTS = 40;
 const HYBRID916_RED_STOP_MINUTE = 9 * 60 + 26;
 const HYBRID916_GREEN_STOP_MINUTE = 9 * 60 + 17;
-/** One minute running this far against its own open closes the 9:16 backtest as a loss. */
-const HYBRID916_MINUTE_SPIKE_PTS = 25;
 
 /** Band from the 9:15 bar — mirrors liveExitModeForRow but runs before the row exists. */
 function breakoutBandForChange(
@@ -3234,7 +3233,7 @@ export function computeLiveRedPeMain916ConfirmFilterStats(
   const redDays = rows.filter((row) => row.direction === "down");
   const sizeFiltered = liveRedPeMainRows(rows, points);
   const filtered = liveRedPe916HybridRows(rows, points);
-  const wins = filtered.filter((row) => hybrid916Hit(row, points.backtestTarget10, points)).length;
+  const wins = filtered.filter((row) => hybrid916Hit(row, points.backtestTarget10, points, "PE")).length;
   const filteredTrades = filtered.length;
   const redConfirmFlat15Trades = filtered.filter(is916RedConfirmOpen).length;
   const greenGapFlat10Trades = filtered.filter(is916GreenGapAtOpen).length;
@@ -3554,15 +3553,16 @@ function hybrid916MinuteSpike(row: NineFifteenCandleRow, side: Hybrid916Side): N
   return (side === "CE" ? row.ceMinuteSpikeStop : row.peMinuteSpikeStop) ?? null;
 }
 
-/**
- * The 25-pt minute closes the trade when it prints before the flat target, the 40-pt checkpoint
+/** The 35-pt minute closes the trade when it prints before the flat target, the 40-pt checkpoint
  * open, and a return to the 9:16 price. Same-minute return: the level closer to the bar open wins.
  */
 function hybrid916MinuteSpikeIsExit(
   row: NineFifteenCandleRow,
   side: Hybrid916Side,
   targetHit: NineFifteenTargetHit | null,
+  minuteSpike = true,
 ): boolean {
+  if (!minuteSpike) return false;
   const spike = hybrid916MinuteSpike(row, side);
   if (!spike) return false;
   const spikeMin = minutesFromIstTime(spike.timeIst);
@@ -3591,6 +3591,7 @@ function hybrid916MinuteSpikeIsExit(
 }
 
 /**
+ * Win if the flat target prints before a 35-pt adverse minute and by the stop minute, or — when
  * Win if the flat target prints before a 25-pt adverse minute and by the stop minute, or — when
  * neither that minute stop nor the 40-pt checkpoint fires — if Nifty returns to the 9:16 open
  * or still hits the flat target later in the session.
@@ -3600,6 +3601,7 @@ function hybrid916Outcome(
   gapTargetPoints: number,
   points: IndexPoints,
   side: Hybrid916Side,
+  minuteSpike = true,
 ): {
   win: boolean;
   stopped: boolean;
@@ -3609,29 +3611,30 @@ function hybrid916Outcome(
   targetAfterDeadline: boolean;
 } {
   const targetHit = hybrid916TargetHit(row, gapTargetPoints, points, side);
-  const minuteSpike = hybrid916MinuteSpikeIsExit(row, side, targetHit);
-  const stopped = !minuteSpike && hybrid916AdverseStopFired(row, side, targetHit);
+  const spikeExit = hybrid916MinuteSpikeIsExit(row, side, targetHit, minuteSpike);
+  const stopped = !spikeExit && hybrid916AdverseStopFired(row, side, targetHit);
   const deadline = side === "CE" ? HYBRID916_GREEN_STOP_MINUTE : HYBRID916_RED_STOP_MINUTE;
   const targetInTime = targetHit != null && minutesFromIstTime(targetHit.timeIst) <= deadline;
-  const returnAt = minuteSpike || stopped ? null : hybrid916ReturnToEntryTime(row, side);
+  const returnAt = spikeExit || stopped ? null : hybrid916ReturnToEntryTime(row, side);
   const targetAfterDeadline =
-    !minuteSpike &&
+    !spikeExit &&
     !stopped &&
     targetHit != null &&
     minutesFromIstTime(targetHit.timeIst) > deadline;
   const win =
-    !minuteSpike &&
+    !spikeExit &&
     ((targetInTime && !stopped) || (!stopped && returnAt != null) || targetAfterDeadline);
-  return { win, stopped, minuteSpike, targetHit, returnAt, targetAfterDeadline };
+  return { win, stopped, minuteSpike: spikeExit, targetHit, returnAt, targetAfterDeadline };
 }
 
 function hybrid916Hit(
   row: NineFifteenCandleRow,
   gapTargetPoints: number,
   points: IndexPoints,
-  side: Hybrid916Side = "PE",
+  side: Hybrid916Side,
+  minuteSpike = true,
 ): boolean {
-  return hybrid916Outcome(row, gapTargetPoints, points, side).win;
+  return hybrid916Outcome(row, gapTargetPoints, points, side, minuteSpike).win;
 }
 
 function addCalendarDaysIst(dateKey: string, days: number): string {
@@ -3759,8 +3762,9 @@ function hybrid916CheckpointHit(
   gapTargetPoints: number,
   points: IndexPoints,
   side: Hybrid916Side,
+  minuteSpike = true,
 ): boolean {
-  const outcome = hybrid916Outcome(row, gapTargetPoints, points, side);
+  const outcome = hybrid916Outcome(row, gapTargetPoints, points, side, minuteSpike);
   if (!outcome.win) return false;
   const deadline = side === "CE" ? HYBRID916_GREEN_STOP_MINUTE : HYBRID916_RED_STOP_MINUTE;
   const targetInTime =
@@ -3782,9 +3786,10 @@ function buildHybrid916TradeDayDetail(
   points: IndexPoints,
   gapTargetPoints: number,
   side: Hybrid916Side,
+  minuteSpike = true,
 ): NineFifteenCePeFailureTrade {
   const targetPoints = hybrid916ConfirmOpen(row, side) ? points.backtestTarget15 : gapTargetPoints;
-  const outcome = hybrid916Outcome(row, gapTargetPoints, points, side);
+  const outcome = hybrid916Outcome(row, gapTargetPoints, points, side, minuteSpike);
   const entryPx = entryIndexPrice(row);
   const deadline = side === "CE" ? HYBRID916_GREEN_STOP_MINUTE : HYBRID916_RED_STOP_MINUTE;
   const targetInTime =
@@ -3834,16 +3839,17 @@ function buildHybrid916FollowStats(
   _variant: ConsolidatedExitVariant = "default",
   byDate?: MinuteCandlesByDate,
   side: Hybrid916Side = "PE",
+  minuteSpike = true,
 ): NineFifteenCePeStrategyStats {
   const tradeDays = taken.length;
   const successes = taken
-    .filter((row) => hybrid916Hit(row, gapTargetPoints, points, side))
-    .map((row) => buildHybrid916TradeDayDetail(row, points, gapTargetPoints, side))
+    .filter((row) => hybrid916Hit(row, gapTargetPoints, points, side, minuteSpike))
+    .map((row) => buildHybrid916TradeDayDetail(row, points, gapTargetPoints, side, minuteSpike))
     .sort((a, b) => b.date.localeCompare(a.date));
   const failures = taken
-    .filter((row) => !hybrid916Hit(row, gapTargetPoints, points, side))
+    .filter((row) => !hybrid916Hit(row, gapTargetPoints, points, side, minuteSpike))
     .map((row) => {
-      const detail = buildHybrid916TradeDayDetail(row, points, gapTargetPoints, side);
+      const detail = buildHybrid916TradeDayDetail(row, points, gapTargetPoints, side, minuteSpike);
       const rawHit = hybrid916TargetHit(row, gapTargetPoints, points, side);
       if (detail.minuteSpikeExit || hybrid916AdverseStopFired(row, side, rawHit)) return detail;
       if (!byDate || detail.winConfirmed) return detail;
@@ -3856,14 +3862,15 @@ function buildHybrid916FollowStats(
 
   const checkpointHits = {} as NineFifteenCePeStrategyStats["checkpointHits"];
   for (const cp of NINE_FIFTEEN_TIME_CHECKPOINTS) {
-    const hits = taken.filter((row) => hybrid916CheckpointHit(row, cp, gapTargetPoints, points, side)).length;
+    const hits = taken.filter((row) =>
+      hybrid916CheckpointHit(row, cp, gapTargetPoints, points, side, minuteSpike),
+    ).length;
     checkpointHits[cp] = {
       targetHits: hits,
       targetHitPct: tradeDays > 0 ? (hits / tradeDays) * 100 : 0,
     };
   }
-
-  return {
+  const stats: NineFifteenCePeStrategyStats = {
     label,
     side,
     sampleDays: rows.length,
@@ -3874,6 +3881,21 @@ function buildHybrid916FollowStats(
     failures,
     successes,
   };
+  if (minuteSpike) {
+    stats.withoutMinuteSpike = buildHybrid916FollowStats(
+      rows,
+      taken,
+      label,
+      points,
+      gapTargetPoints,
+      profile,
+      _variant,
+      byDate,
+      side,
+      false,
+    );
+  }
+  return stats;
 }
 
 /** Green second-candle confirm: skip only when 9:16 gaps down below the 9:15 close. */
@@ -3940,7 +3962,7 @@ export function computeLiveRedPeBody10FilterStats(
   const redDays = rows.filter((row) => row.direction === "down");
   const sizeFiltered = liveRedPeBody10Rows(rows);
   const filtered = liveRedPeFlatHybridRows(sizeFiltered);
-  const wins = filtered.filter((row) => hybrid916Hit(row, points.backtestTarget8, points)).length;
+  const wins = filtered.filter((row) => hybrid916Hit(row, points.backtestTarget8, points, "PE")).length;
   const filteredTrades = filtered.length;
   const redConfirmFlat15Trades = filtered.filter(is916RedConfirmOpen).length;
   const greenGapFlat10Trades = filtered.filter(is916GreenGapAtOpen).length;
@@ -4289,8 +4311,7 @@ export function buildTuesdayTenPointStats(
 
 
 /** Bump when the shape or maths of the result changes — invalidates the on-disk payload. */
-const CACHE_VERSION =
-  "v148:916-minute-spike-25-loss";
+const CACHE_VERSION = "v149:916-minute-spike-35-loss";
 /**
  * Completed sessions never change, so the only thing a rebuild adds is today's session. A short
  * TTL just meant a 4–6 minute rebuild every half hour, which pegs this 2 GB host and slows down

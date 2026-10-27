@@ -58,6 +58,8 @@ export interface NineFifteenHighMinus5Rules {
   signalMinuteLabel?: string;
   instrumentLabel?: string;
   lateWinAfterIst?: string;
+  /** Gap and the 9:15 body point the same way, body ≥ 15, exit 15 pts from the 9:15 close. */
+  sameDirection15?: boolean;
 }
 
 export interface NineFifteenHighMinus5BacktestSlice {
@@ -191,5 +193,11 @@ export interface NineFifteenHighMinus5BacktestResult {
   openAtOpen: NineFifteenHighMinus5BacktestSlice;
   /** Same red/green open±5 strategies on every 1-min signal 9:20–15:00. */
   fullDay: NineFifteenFullDayBacktestResult;
+  /** Live 9:15 rule on 1-minute candles: same-direction gap, 15-pt body, exit 15 pts from the close. */
+  sameDirection15?: {
+    all: NineFifteenHighMinus5BacktestSlice;
+    pe: NineFifteenHighMinus5BacktestSlice;
+    ce: NineFifteenHighMinus5BacktestSlice;
+  };
   warnings: string[];
 }

@@ -234,12 +234,13 @@ console.log(
 );
 console.log("hybrid adverse pts", NINE_SIXTEEN_HYBRID_ADVERSE_STOP_PTS);
 
-console.log("\n--- 9:16 minute spike (25 pts from this minute's open) ---");
+console.log("\n--- 9:16 minute spike (35 pts from this minute's open) ---");
 console.log("pts", NINE_SIXTEEN_MINUTE_SPIKE_PTS);
-console.log("PE +25 exits", ok(shouldExitNineSixteenMinuteSpike(24_025, 24_000, "PE_BUY")));
-console.log("PE +24.99 holds", ok(!shouldExitNineSixteenMinuteSpike(24_024.99, 24_000, "PE_BUY")));
-console.log("CE −25 exits", ok(shouldExitNineSixteenMinuteSpike(23_975, 24_000, "CE_BUY")));
-console.log("CE −24.99 holds", ok(!shouldExitNineSixteenMinuteSpike(23_975.01, 24_000, "CE_BUY")));
+console.log("threshold is 35", ok(NINE_SIXTEEN_MINUTE_SPIKE_PTS === 35));
+console.log("PE +35 exits", ok(shouldExitNineSixteenMinuteSpike(24_035, 24_000, "PE_BUY")));
+console.log("PE +34.99 holds", ok(!shouldExitNineSixteenMinuteSpike(24_034.99, 24_000, "PE_BUY")));
+console.log("CE −35 exits", ok(shouldExitNineSixteenMinuteSpike(23_965, 24_000, "CE_BUY")));
+console.log("CE −34.99 holds", ok(!shouldExitNineSixteenMinuteSpike(23_965.01, 24_000, "CE_BUY")));
 console.log("open tick holds", ok(!shouldExitNineSixteenMinuteSpike(24_000, 24_000, "PE_BUY")));
 
 console.log("\n--- 9:16 trail (lock target − 2 · stop = best 1-min close − 4 · flat 10:00) ---");

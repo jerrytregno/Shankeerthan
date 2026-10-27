@@ -586,7 +586,7 @@ export function LossTradesAccordion({
             const exitClock = exit?.timeIst.slice(0, 5) ?? "—";
             const diff = niftyExitMinusOpen(trade, "loss");
             const exitNote = trade.minuteSpikeExit
-              ? " · 25-pt minute"
+              ? " · 35-pt minute"
               : trade.adverseStopExit
                 ? ""
                 : exit != null

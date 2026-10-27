@@ -6,6 +6,7 @@
  */
 import {
   decideNineFifteenEntry,
+  shouldExitNineFifteenIndexTarget,
   decide915Entry,
   build915BarFromCaptured,
   NINE_FIFTEEN_MIN_DROP_PTS,
@@ -72,35 +73,29 @@ function ist(h: number, m: number, s: number, ms = 0): number {
   return Date.UTC(2026, 7, 31, h - 5, m - 30, s, ms);
 }
 
-console.log("\n--- the ten-second read decides red or green ---");
-check("red with 10 pt drop buys the PE", decideNineFifteenEntry(24_800, 24_790), {
+console.log("\n--- gap and the 10-second move must point the same way, and the move is 15 ---");
+check("opened down and fell 15 buys PE", decideNineFifteenEntry(24_800, 24_785, 24_820), {
   action: "enter",
   leg: "PE_BUY",
-  movePts: 10,
+  movePts: 15,
 });
-check(
-  "a one-paisa fall is too small — need at least 10 pts",
-  decideNineFifteenEntry(24_800, 24_799.95).action,
-  "skip",
-);
-check("exactly 10 pts down enters", decideNineFifteenEntry(24_800, 24_790), {
-  action: "enter",
-  leg: "PE_BUY",
-  movePts: 10,
-});
-check("exactly 5 pts down is skipped", decideNineFifteenEntry(24_800, 24_795).action, "skip");
-check("9.9 pts down is skipped", decideNineFifteenEntry(24_800, 24_790.1).action, "skip");
-check("green with 10 pt rise buys CE", decideNineFifteenEntry(24_800, 24_810), {
+check("opened up and rose 15 buys CE", decideNineFifteenEntry(24_800, 24_815, 24_780), {
   action: "enter",
   leg: "CE_BUY",
-  movePts: 10,
+  movePts: 15,
 });
-check("9.9 pts up is skipped", decideNineFifteenEntry(24_800, 24_809.9).action, "skip");
-check("exactly 5 pts up is skipped", decideNineFifteenEntry(24_800, 24_805).action, "skip");
-check("4.9 pts up is skipped", decideNineFifteenEntry(24_800, 24_804.9).action, "skip");
-check("flat is skipped", decideNineFifteenEntry(24_800, 24_800).action, "skip");
-check("a missing open is skipped", decideNineFifteenEntry(0, 24_790).action, "skip");
-check("a missing read is skipped", decideNineFifteenEntry(24_800, 0).action, "skip");
+check("14.9 pts down is skipped", decideNineFifteenEntry(24_800, 24_785.1, 24_820).action, "skip");
+check("opened up but the 10s fell is skipped", decideNineFifteenEntry(24_800, 24_780, 24_780).action, "skip");
+check("opened down but the 10s rose is skipped", decideNineFifteenEntry(24_800, 24_820, 24_820).action, "skip");
+check("a flat gap is skipped", decideNineFifteenEntry(24_800, 24_780, 24_800).action, "skip");
+check("flat at 10s is skipped", decideNineFifteenEntry(24_800, 24_800, 24_820).action, "skip");
+check("a missing yesterday close is skipped", decideNineFifteenEntry(24_800, 24_780, null).action, "skip");
+check("a missing open is skipped", decideNineFifteenEntry(0, 24_790, 24_820).action, "skip");
+check("a missing read is skipped", decideNineFifteenEntry(24_800, 0, 24_820).action, "skip");
+check("PE exits 15 pts under the fill", shouldExitNineFifteenIndexTarget("PE_BUY", 24_000, 23_985), true);
+check("PE holds 14.9 pts under the fill", shouldExitNineFifteenIndexTarget("PE_BUY", 24_000, 23_985.1), false);
+check("CE exits 15 pts over the fill", shouldExitNineFifteenIndexTarget("CE_BUY", 24_000, 24_015), true);
+check("CE holds 14.9 pts over the fill", shouldExitNineFifteenIndexTarget("CE_BUY", 24_000, 24_014.9), false);
 
 console.log("\n--- timing gates ---");
 check("the read is due at 9:15:10.000", isPastNineFifteenSignalRead(ist(9, 15, 10)), true);
@@ -131,7 +126,7 @@ check("+50% locks +30%", nextNineFifteenLockedPnlPct(20, 50), 30);
 check("next target after +50% is +60%", trailingNineFifteenTargetPct(30), 60);
 check("does not exit at target alone", shouldExitNineFifteenTrailingPnl(2, 3), false);
 check("exits below stop floor", shouldExitNineFifteenTrailingPnl(2, 1.99), true);
-check("ladder mentions trailing", getNineFifteenLadderLabel().includes("trailing"), true);
+check("ladder mentions the 15-pt Nifty exit", getNineFifteenLadderLabel().includes("15 Nifty pts"), true);
 check("schedule mentions +3→lock+2", getNineFifteenPnlTrailScheduleLabel().includes("+3→lock+2%"), true);
 
 console.log("\n--- 9:15:57 flip exit for 9:16 ---");
@@ -213,11 +208,11 @@ check("deployed capital is entry × qty", nineFifteenDeployedCapital(100, 650), 
 check("profit aim is 5% of deployed", nineFifteenTakeProfitAmount(100, 1000, 5), 5000);
 check("profit aim is 10% of deployed", nineFifteenTakeProfitAmount(100, 1000, 10), 10_000);
 check("₹1L deployed → ₹5K profit aim", nineFifteenTakeProfitAmount(100, 1000, 5), 100_000 * 0.05);
-check("label mentions +3% on Tuesday PE", getNineFifteenLadderLabel("2026-09-01", "PE_BUY").includes("+3%"), true);
-check("label mentions +3% on Tuesday CE", getNineFifteenLadderLabel("2026-09-01", "CE_BUY").includes("+3%"), true);
-check("label mentions +3% on Wednesday", getNineFifteenLadderLabel("2026-09-02", "CE_BUY").includes("+3%"), true);
-check("label mentions +3% on Thursday", getNineFifteenLadderLabel("2026-09-03", "CE_BUY").includes("+3%"), true);
-check("label mentions +3% on Friday", getNineFifteenLadderLabel("2026-09-04", "CE_BUY").includes("+3%"), true);
+check("label mentions 15-pt exit on Tuesday PE", getNineFifteenLadderLabel("2026-09-01", "PE_BUY").includes("15 Nifty pts"), true);
+check("label mentions 15-pt exit on Tuesday CE", getNineFifteenLadderLabel("2026-09-01", "CE_BUY").includes("15 Nifty pts"), true);
+check("label mentions 15-pt exit on Wednesday", getNineFifteenLadderLabel("2026-09-02", "CE_BUY").includes("15 Nifty pts"), true);
+check("label mentions 15-pt exit on Thursday", getNineFifteenLadderLabel("2026-09-03", "CE_BUY").includes("15 Nifty pts"), true);
+check("label mentions 15-pt exit on Friday", getNineFifteenLadderLabel("2026-09-04", "CE_BUY").includes("15 Nifty pts"), true);
 
 check(
   "exit summary names limit fill and P&L",

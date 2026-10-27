@@ -84,9 +84,13 @@ interface BotStatus {
   nineFifteenBlocked916?: boolean;
   nineFifteenLadder?: string;
   nineFifteenTakeProfitPct?: number;
+  nineFifteenLossExitPct?: number | null;
+  nineFifteenStopLossTrigger?: number | null;
   nineFifteenDeployedCapital?: number | null;
   nineFifteenTpProfitAim?: number | null;
   nineFifteenPnlRemaining?: number | null;
+  nineSixteenTakeProfitPct?: number | null;
+  nineSixteenTakeProfitLimit?: number | null;
   nineSixteenTrailArmed?: boolean;
   nineSixteenTrailSchedule?: string;
   nineSixteenTrailTargetPoints?: number | null;
@@ -235,16 +239,6 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
   const onNineFifteenLeg = status.tradeSlot === "nine-fifteen" && inPosition;
   const onNineSixteenLeg = status.tradeSlot === "nine-sixteen" && inPosition;
   const onFade1405Leg = status.tradeSlot === "fade-1405" && inPosition;
-  const trailArmed = onNineSixteenLeg && Boolean(status.nineSixteenTrailArmed);
-  const trailStopSpot = status.nineSixteenTrailStopSpot ?? null;
-  const trailStopPts = status.nineSixteenTrailStopPoints ?? null;
-  const ptsToTrailStop =
-    trailArmed && trailStopSpot != null && status.lastSpot != null && status.lastSpot > 0
-      ? status.leg === "CE_BUY"
-        ? status.lastSpot - trailStopSpot
-        : trailStopSpot - status.lastSpot
-      : null;
-
   const livePnlPct =
     status.pnlPct ??
     (livePnl != null && status.entryPrice != null && status.quantity != null && status.quantity > 0
@@ -260,7 +254,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
       ? Math.min(100, Math.max(0, (livePnl / profitAim) * 100))
       : null;
 
-  // The 9:15 trailing ladder has a rupee aim; the 9:16 leg trails the Nifty index instead.
+  // 9:15 marks the ladder aim in the panel. 9:16 waits for the resting limit to fill.
   const pnlTargetReached =
     inPosition &&
     status.pnlTargetAmount != null &&
@@ -379,7 +373,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                 : "14:05 fade armed for this afternoon."}
           </strong>{" "}
           {onFade1405Leg
-            ? "Exit on Nifty trail (25 / 5 / 4 / 10) — not the 9:16 index target."
+            ? "Exit on Nifty trail (25 / 5 / 4 / 10) — not the 9:16 weekday limit sell."
             : status.fade1405Settled
               ? "No second 14:05 entry today."
               : "After morning legs finish, watches 14:05 close for 100+ pts from 9:15 open and range vs yesterday."}
@@ -396,15 +390,11 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
               9:15:10 read {formatNumber(status.nineFifteenMarkPrice, 2)} against the open{" "}
               {formatNumber(status.open915 ?? 0, 2)} · Δ {nineFifteenMarkChange >= 0 ? "+" : ""}
               {formatNumber(nineFifteenMarkChange, 2)} pts —{" "}
-              {nineFifteenMarkChange <= -10
-                ? "red ≥ 10 pts, buying the ATM PE"
-                : nineFifteenMarkChange >= 10
-                  ? "green ≥ 10 pts, buying the ATM CE"
-                  : nineFifteenMarkChange < 0
-                    ? "red but under 10 pts, no 9:15 trade"
-                    : nineFifteenMarkChange === 0
-                      ? "flat, no 9:15 trade"
-                      : "green but under 10 pts, no 9:15 trade"}
+              {Math.abs(nineFifteenMarkChange) >= 15
+                ? nineFifteenMarkChange < 0
+                  ? "down 15 or more at 10s — PE only if the open is also below yesterday's close"
+                  : "up 15 or more at 10s — CE only if the open is also above yesterday's close"
+                : "10s move under 15 pts, no 9:15 trade"}
               .
             </>
           ) : (
@@ -433,8 +423,8 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
               <strong>9:15:11</strong> — <strong>NRML market BUY</strong> (REST LTP sizing + 3% margin cushion, fast
               fill).{" "}
               <strong>9:16:00</strong> (first WS tick) — <strong>NRML market BUY</strong> sized on the latest option websocket price
-              (CE + PE subscribed from <strong>9:15:58</strong>) plus a 3% margin cushion. Exits are{" "}
-              <strong>market sells</strong> — 9:15 on its trailing P&amp;L ladder, 9:16 on the Nifty trail.
+              (CE + PE subscribed from <strong>9:15:58</strong>) plus a 3% margin cushion. 9:15 exits on its trailing
+              P&amp;L ladder. 9:16 places a <strong>limit sell</strong> at the weekday profit % the moment it fills.
             </span>
           </div>
           <div className="pat-metric">
@@ -456,23 +446,20 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
             <span className="pat-metric-label">P&amp;L exit</span>
             <span className="pat-metric-value">
               {onNineFifteenLeg
-                ? `9:15 · trailing +${status.pnlTrailArmPct ?? 3}%→…`
+                ? "9:15 · 15 Nifty pts from the fill"
                 : onNineSixteenLeg
-                  ? trailArmed
-                    ? "9:16 · Nifty trail armed"
-                    : "9:16 · Nifty target → trail"
-                  : "9:16 · Nifty trail after the target"}
+                  ? `9:16 · limit +${status.nineSixteenTakeProfitPct ?? 7}%`
+                  : "9:16 · weekday limit sell"}
             </span>
             <span className="pat-metric-hint">
               {onNineFifteenLeg ? (
                 <>
-                  <strong>Trailing P&amp;L</strong> on every option LTP websocket tick (% on capital deployed).
-                  Active target{" "}
-                  <strong>+{nineFifteenTpPct}%</strong>
-                  {status.pnlLockedPct != null && status.pnlLockedPct > 0
-                    ? ` · stop floor +${status.pnlLockedPct}%`
-                    : ""}
-                  . Hitting the target ratchets the ladder (does not exit); slip to the stop floor → market exit.{" "}
+                  <strong>15 Nifty points</strong> from the 9:15:11 fill — PE down, CE up — market sell. P&amp;L{" "}
+                  <strong>−{status.nineFifteenLossExitPct ?? 15}%</strong> market-sells immediately
+                  {status.nineFifteenStopLossTrigger != null
+                    ? ` · SL-M trigger ₹${formatNumber(status.nineFifteenStopLossTrigger, 2)}`
+                    : " · SL-M at −20% of the entry premium"}
+                  .{" "}
                   <strong>9:15 open stop</strong> — PE market sell if Nifty goes above the 9:15 open, CE if Nifty
                   goes below it.{" "}
                   {status.pnlExitSchedule ? <> Schedule: {status.pnlExitSchedule}.</> : null}{" "}
@@ -483,51 +470,21 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                   <strong>3:25 PM</strong> square-off if still open.
                 </>
               ) : onNineSixteenLeg ? (
-                trailArmed ? (
-                  <>
-                    Target {status.leg === "CE_BUY" ? "+" : "−"}
-                    {status.nineSixteenTrailTargetPoints ?? "—"} touched — <strong>no limit sell</strong>. Stop{" "}
-                    <strong>{trailStopSpot != null ? formatNumber(trailStopSpot, 2) : "—"}</strong>
-                    {trailStopPts != null ? ` (+${formatNumber(trailStopPts, 2)} pts locked)` : ""}; at every
-                    1-minute close it moves to the best close
-                    {status.nineSixteenTrailBestClosePoints != null
-                      ? ` (now +${formatNumber(status.nineSixteenTrailBestClosePoints, 2)} pts)`
-                      : ""}{" "}
-                    − 4 pts and never back. Market sell on the first Nifty tick at the stop; anything open at{" "}
-                    <strong>10:00</strong> sells at market. <strong>3:25 PM</strong> square-off still applies.
-                  </>
-                ) : (
-                  <>
-                    <strong>No limit sell.</strong>{" "}
-                    {status.leg === "CE_BUY" ? (
-                      <>
-                        Nifty target <strong>+12</strong> (both green) or <strong>+8</strong> (red gap, or a print below
-                        the 9:15:59 close) until 9:17
-                      </>
-                    ) : (
-                      <>
-                        Nifty target <strong>−12</strong> until a print above the 9:15:59 close, then{" "}
-                        <strong>−8</strong>; a green-gap open is −8, then <strong>−6 from 9:17:00</strong> if that minute
-                        closes green
-                      </>
-                    )}
-                    . The first tick at the target <strong>locks target − 2</strong> and starts the trail: stop at the
-                    best 1-minute close − 4 pts, market sell on the stop, flat at <strong>10:00</strong>.{" "}
-                    {status.leg === "CE_BUY" ? (
-                      <>
-                        A CE that misses the target by 9:17 sells when Nifty is back at the <strong>entry spot</strong>.{" "}
-                      </>
-                    ) : null}
-                    <strong>3:25 PM</strong> square-off.
-                  </>
-                )
+                <>
+                  <strong>Limit sell</strong> placed at the fill:{" "}
+                  <strong>+{status.nineSixteenTakeProfitPct ?? "—"}%</strong> on the entry premium
+                  {status.nineSixteenTakeProfitLimit != null
+                    ? ` · ₹${formatNumber(status.nineSixteenTakeProfitLimit, 2)}`
+                    : ""}
+                  . Wednesday 3% · Thursday 4% · Friday 5% · Monday 6% · Tuesday 7%. The 35-pt minute spike, the
+                  40-pt checkpoint, and entry return still market-sell and cancel this limit.{" "}
+                  <strong>3:25 PM</strong> square-off.
+                </>
               ) : (
                 <>
-                  9:16 has <strong>no limit sell</strong>. The first Nifty tick at the target (PE −12 / −8 · CE +12 /
-                  +8 until 9:17) locks <strong>target − 2</strong>; the stop then follows the best 1-minute close by{" "}
-                  <strong>4 pts</strong>, sells at market on the stop, and anything open at <strong>10:00</strong> sells.
-                  Before the target: adverse checkpoint / entry return, CE entry-spot aim from 9:17.{" "}
-                  <strong>3:25 PM</strong> square-off.
+                  9:16 places a <strong>limit sell</strong> the moment the entry fills: Wednesday 3% · Thursday 4% ·
+                  Friday 5% · Monday 6% · Tuesday 7% on the entry premium. The 35-pt minute spike and the 40-pt
+                  checkpoint still market-sell. <strong>3:25 PM</strong> square-off.
                 </>
               )}
               {status.nineSixteenMinuteOpen != null && status.nineSixteenMinuteSpikeStop != null && (
@@ -535,39 +492,22 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                   {" "}
                   This minute opened at <strong>{formatNumber(status.nineSixteenMinuteOpen, 2)}</strong>. Market
                   sell if Nifty {status.leg === "CE_BUY" ? "≤" : "≥"}{" "}
-                  <strong>{formatNumber(status.nineSixteenMinuteSpikeStop, 2)}</strong> (25 pts against that open).
+                  <strong>{formatNumber(status.nineSixteenMinuteSpikeStop, 2)}</strong> (35 pts against that open).
                 </>
               )}
             </span>
           </div>
-          {onNineSixteenLeg && trailArmed && (
+          {onNineSixteenLeg && (
             <div className="pat-metric pat-metric--highlight">
-              <span className="pat-metric-label">Trail stop (Nifty)</span>
+              <span className="pat-metric-label">Limit sell</span>
               <span className="pat-metric-value">
-                {trailStopSpot != null ? formatNumber(trailStopSpot, 2) : "—"}
+                {status.nineSixteenTakeProfitLimit != null
+                  ? `₹${formatNumber(status.nineSixteenTakeProfitLimit, 2)}`
+                  : "Placing…"}
               </span>
               <span className="pat-metric-hint">
-                {trailStopPts != null ? `+${formatNumber(trailStopPts, 2)} pts locked` : "Locked"}
-                {ptsToTrailStop != null ? ` · ${formatNumber(ptsToTrailStop, 2)} pts from the stop` : ""}
-                {status.nineSixteenTrailArmedAt
-                  ? ` · armed ${new Date(status.nineSixteenTrailArmedAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" })} IST`
-                  : ""}{" "}
-                · market sell on the stop or at 10:00
-              </span>
-            </div>
-          )}
-          {onNineSixteenLeg && !trailArmed && status.indexExitSchedule && (
-            <div className="pat-metric pat-metric--highlight">
-              <span className="pat-metric-label">Nifty target (starts the trail)</span>
-              <span className="pat-metric-value">
-                {status.targetSpot != null ? formatNumber(status.targetSpot, 2) : "—"}
-              </span>
-              <span className="pat-metric-hint">
-                {status.indexExitSchedule}
-                {status.niftyPointsToTarget != null
-                  ? ` · ${formatNumber(status.niftyPointsToTarget, 2)} pts until target`
-                  : ""}{" "}
-                · no sell at the target — it locks target − 2 and trails
+                +{status.nineSixteenTakeProfitPct ?? "—"}% on the entry premium
+                {profitAim != null ? ` · aim ${formatCurrency(profitAim)}` : ""}
               </span>
             </div>
           )}
@@ -585,8 +525,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                 <>
                   On the first websocket tick at {hardStopStartLabel}, exit if Nifty is {hardStopPoints} pts against
                   the 9:16 entry (PE ≥ entry + {hardStopPoints} · CE ≤ entry − {hardStopPoints}). If not stopped,
-                  exit instantly when Nifty touches the entry spot again. Only until the Nifty target is touched —
-                  after that the trail alone exits the trade.
+                  exit instantly when Nifty touches the entry spot again. This cancels the resting limit sell.
                 </>
               ) : (
                 <>
@@ -645,10 +584,9 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
             Entry return armed · exit when Nifty touches {formatNumber(status.entrySpot, 2)}
           </span>
         )}
-        {trailArmed && trailStopSpot != null && (
+        {onNineSixteenLeg && status.nineSixteenTakeProfitLimit != null && (
           <span className="pat-badge pat-badge--on">
-            9:16 trail · stop {formatNumber(trailStopSpot, 2)}
-            {trailStopPts != null ? ` (+${formatNumber(trailStopPts, 2)} pts locked)` : ""}
+            Limit sell ₹{formatNumber(status.nineSixteenTakeProfitLimit, 2)} (+{status.nineSixteenTakeProfitPct}%)
           </span>
         )}
         {!isNineSixteenSlot &&
@@ -682,11 +620,9 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
         <div className={cn("pat-pnl-block", pnlBlockClass, (targetReached || pnlTargetReached) && "is-hit")}>
           <div className="pat-pnl-label">
             {onNineFifteenLeg
-              ? "Live P&L · 9:15 leg (until exit)"
+              ? "Live P&L · 9:15 leg (until +15 Nifty pts)"
               : onNineSixteenLeg
-                ? trailArmed
-                  ? "Live P&L · 9:16 leg (trailing)"
-                  : "Live P&L · 9:16 leg (until exit)"
+                ? "Live P&L · 9:16 leg (until the limit fills)"
                 : onFade1405Leg
                   ? "Live P&L · 14:05 fade (Nifty trail exit)"
                   : "Live P&L (Zerodha)"}
@@ -722,16 +658,11 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
           )}
           {onNineSixteenLeg && (
             <p className="pat-pnl-sub">
-              {deployedCapital != null ? `Deployed ${formatCurrency(deployedCapital)} · ` : ""}
-              {trailArmed
-                ? `trail stop Nifty ${trailStopSpot != null ? formatNumber(trailStopSpot, 2) : "—"}` +
-                  (trailStopPts != null ? ` (+${formatNumber(trailStopPts, 2)} pts locked)` : "")
-                : status.targetSpot != null
-                  ? `Nifty target ${formatNumber(status.targetSpot, 2)}` +
-                    (status.niftyPointsToTarget != null
-                      ? ` (${formatNumber(status.niftyPointsToTarget, 2)} pts away) starts the trail`
-                      : " starts the trail")
-                  : "Nifty target not armed"}
+              limit sell +{status.nineSixteenTakeProfitPct ?? "—"}%
+              {status.nineSixteenTakeProfitLimit != null
+                ? ` @ ₹${formatNumber(status.nineSixteenTakeProfitLimit, 2)}`
+                : ""}
+              {profitAim != null ? ` · aim ${formatCurrency(profitAim)}` : ""}
             </p>
           )}
           {status.entryPrice != null && status.lastOptionPrice != null && status.quantity != null && (
@@ -763,10 +694,12 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                 {status.entrySpot != null ? formatNumber(status.entrySpot, 2) : "—"}
               </span>
               <span className="pat-stat-hint">
-                {isNineSixteenSlot ? "reference · Nifty target and trail measured from here" : "reference"}
+                {isNineSixteenSlot
+                  ? "reference · 40-pt stop and entry return measured from here"
+                  : "reference · 15-pt target measured from here"}
                 {isNineSixteenSlot
                   ? ` · ${hardStopStartLabel} adverse ${hardStopPoints} pts + entry return`
-                  : ` · ${hardStopStartLabel} hard stop ±${hardStopPoints} pts`}
+                  : ` · exit at 15 pts from this price`}
                 {status.exitMode === "main" ? " · main entry (|Δ| ≥ 15)" : ""}
               </span>
             </div>
@@ -806,24 +739,14 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
             </div>
             {isNineSixteenSlot ? (
               <div className="pat-stat">
-                <span className="pat-stat-label">{trailArmed ? "Trail stop (Nifty)" : "Nifty target"}</span>
-                <span className={cn("pat-stat-value", trailArmed && "text-up")}>
-                  {trailArmed
-                    ? trailStopSpot != null
-                      ? formatNumber(trailStopSpot, 2)
-                      : "—"
-                    : status.targetSpot != null
-                      ? formatNumber(status.targetSpot, 2)
-                      : "—"}
+                <span className="pat-stat-label">Limit sell (+{status.nineSixteenTakeProfitPct ?? "—"}%)</span>
+                <span className="pat-stat-value">
+                  {status.nineSixteenTakeProfitLimit != null
+                    ? `₹${formatNumber(status.nineSixteenTakeProfitLimit, 2)}`
+                    : "—"}
                 </span>
                 <span className="pat-stat-hint">
-                  {trailArmed
-                    ? `${trailStopPts != null ? `+${formatNumber(trailStopPts, 2)} pts locked · ` : ""}best 1-min close ${
-                        status.nineSixteenTrailBestClosePoints != null
-                          ? `+${formatNumber(status.nineSixteenTrailBestClosePoints, 2)} pts`
-                          : "—"
-                      } · flat 10:00`
-                    : "no limit sell · the touch locks target − 2 and trails 4 behind the best 1-min close"}
+                  Weekday aim on the entry premium · Wed 3 · Thu 4 · Fri 5 · Mon 6 · Tue 7
                 </span>
               </div>
             ) : (
@@ -835,7 +758,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                   {status.pnlTargetAmount != null ? formatCurrency(status.pnlTargetAmount) : "—"}
                 </span>
                 <span className="pat-stat-hint">
-                  {onNineFifteenLeg ? "Trailing ladder target" : "Nifty trail exit"}
+                  {onNineFifteenLeg ? "15 Nifty pts from the 9:15:11 fill" : "Nifty trail exit"}
                   {onNineFifteenLeg && livePnlPct != null
                     ? ` · now ${livePnlPct >= 0 ? "+" : ""}${formatNumber(livePnlPct, 2)}%`
                     : ""}
@@ -1051,9 +974,10 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
 
       <p className="pat-idle-note text-muted">
         <strong>9:15 trade</strong> (always on server): first tick at 9:15:00 = open; last tick before 9:15:10 vs
-        open — red ≥ <strong>10 pts</strong> → <strong>NRML market BUY</strong> ATM PE · green ≥ <strong>10 pts</strong>{" "}
-        → ATM CE at 9:15:11 (full balance, split <strong>25 lots</strong> per order). Exit:{" "}
-        <strong>trailing P&amp;L</strong> on option WS ticks from <strong>+3%</strong> (ratchet · exit on stop floor);
+        open. Opened down and still falling by <strong>15 pts</strong> → <strong>NRML market BUY</strong> ATM PE ·
+        opened up and still rising by <strong>15 pts</strong> → ATM CE at 9:15:11. Opposite gap, or a move under 15,
+        skips. Exit at <strong>15 Nifty points</strong> from the 9:15:11 price. P&amp;L <strong>−15%</strong> and the{" "}
+        <strong>SL-M at −20%</strong> still protect the leg.{" "}
         <strong>open stop</strong> — PE if Nifty goes above the 9:15 open, CE if it goes below;
         from <strong>9:15:57</strong> if not in profit and Nifty ≥15 pts against vs open → market exit for{" "}
         <strong>9:16</strong>; if WS 9:15 close
@@ -1062,11 +986,10 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
         <br />
         <br />
         <strong>9:16 trade</strong> (armed on server): 9:15 WS close − open = Δ · flat or |Δ| &lt; 15 → skip ·{" "}
-        <strong>|Δ| ≥ 15</strong> → red buys ATM PE, green buys ATM CE · <strong>NRML market BUY</strong> @{" "}
-        <strong>9:16:00</strong> first WS tick (CE + PE WS from 9:15:58 · sized on latest WS price + 3% cushion · retries until{" "}
-        <strong>9:16:30</strong>). Skipped only if the 9:15 leg is still open at 9:16:00. Exit: <strong>no limit sell</strong> — the
-        first Nifty tick at the target (PE <strong>−12</strong> until a print above the <strong>9:15:59 close</strong>,
-        then <strong>−8</strong> · CE +12/+8 until 9:17) locks <strong>target − 2</strong>; at every 1-minute close the
+        <strong>9:16:30</strong>). Skipped only if the 9:15 leg is still open at 9:16:00. Exit: a{" "}
+        <strong>limit sell</strong> the moment the entry fills — Wednesday <strong>3%</strong> · Thursday{" "}
+        <strong>4%</strong> · Friday <strong>5%</strong> · Monday <strong>6%</strong> · Tuesday <strong>7%</strong> on
+        the entry premium. The 35-pt minute spike and the 40-pt checkpoint still market-sell and cancel that limit.{" "}
         stop moves to the best close − <strong>4</strong> pts; <strong>market sell</strong> on the stop; flat at{" "}
         <strong>10:00</strong>. A CE that misses its target by 9:17 sells back at the <strong>entry spot</strong>.{" "}
         <strong>3:25 PM</strong> square-off.

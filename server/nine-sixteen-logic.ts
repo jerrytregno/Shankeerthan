@@ -60,7 +60,7 @@ export const NINE_SIXTEEN_HYBRID_CE_ADVERSE_CHECK_SEC = 9 * 3600 + 17 * 60;
 export const NINE_SIXTEEN_HYBRID_ADVERSE_STOP_PTS = 40;
 
 /** One 9:16 minute: exit when a Nifty tick runs this far against that minute's own open. */
-export const NINE_SIXTEEN_MINUTE_SPIKE_PTS = 25;
+export const NINE_SIXTEEN_MINUTE_SPIKE_PTS = 35;
 
 /**
  * True once this tick is at least `points` against the trade from the current minute's open.
@@ -127,10 +127,15 @@ export const NINE_SIXTEEN_PRE_RESOLVE_SEC = 9 * 3600 + 15 * 60 + 58;
 /**
  * The 9:15 trade — a separate, earlier leg that runs before the 9:16 one.
  *
- * The 9:15 minute is read ten seconds in: red ≥ 10 pts → ATM PE · green ≥ 10 pts → ATM CE at 9:15:11.
+ * The 9:15 minute is read ten seconds in. Both the gap and that move must point the same way,
+ * and the move must already be 15 points. Entry is 9:15:11. Exit is 15 Nifty points from that fill.
  */
 export const NINE_FIFTEEN_PRE_RESOLVE_SEC = 9 * 3600 + 15 * 60 + 4;
-/** Minimum drop (open − mark) at 9:15:10 to arm the 9:15:11 PE entry. */
+/** 10-second move required, in the same direction as the gap from yesterday's 15:30 close. */
+export const NINE_FIFTEEN_SAME_DIRECTION_MIN_PTS = 15;
+/** Take-profit from the Nifty price at the 9:15:11 fill. PE down, CE up. */
+export const NINE_FIFTEEN_INDEX_EXIT_PTS = 15;
+/** @deprecated Entry is the 15-point same-direction rule. Kept for older imports. */
 export const NINE_FIFTEEN_MIN_DROP_PTS = 10;
 /** 9:15 candle |close − open| below this arms the 9:16:00 small-body exit. Not the entry filter. */
 export const NINE_FIFTEEN_SMALL_BODY_PTS = 5;
@@ -558,39 +563,56 @@ export type NineFifteenEntryDecision =
   | { action: "skip"; reason: string };
 
 /**
- * Direction at the 9:15:10 read, measured against the 9:15 open.
+ * 9:15 entry. Yesterday's 15:30 close and the first 10 seconds must point the same way,
+ * and that 10-second move must already be 15 points.
  *
- * Red ≥ {@link NINE_FIFTEEN_MIN_DROP_PTS} → PE_BUY · green ≥ {@link NINE_FIFTEEN_MIN_RISE_PTS} → CE_BUY.
+ * Opened down and still falling → PE. Opened up and still rising → CE.
  */
 export function decideNineFifteenEntry(
   open: number,
   markPrice: number,
+  prevClose: number | null,
 ): NineFifteenEntryDecision {
   if (!(open > 0) || !(markPrice > 0)) {
     return { action: "skip", reason: "No 9:15 open or 10-second tick to read" };
   }
-  const change = markPrice - open;
-  if (change === 0) {
+  if (prevClose == null || !(prevClose > 0)) {
+    return { action: "skip", reason: "No yesterday 15:30 close — the gap cannot be matched" };
+  }
+  const move = markPrice - open;
+  if (move === 0) {
     return { action: "skip", reason: `Flat at the 10s mark (${markPrice.toFixed(2)}) — no trade` };
   }
-  const movePts = Math.abs(change);
-  if (change > 0) {
-    if (movePts + 1e-9 >= NINE_FIFTEEN_MIN_RISE_PTS) {
-      return { action: "enter", leg: "CE_BUY", movePts };
-    }
+  const movePts = Math.abs(move);
+  const gap = open - prevClose;
+  if (movePts + 1e-9 < NINE_FIFTEEN_SAME_DIRECTION_MIN_PTS) {
+    const sign = move > 0 ? "+" : "−";
     return {
       action: "skip",
-      reason: `Green but rise too small at the 10s mark (+${movePts.toFixed(2)} pts · need at least +${NINE_FIFTEEN_MIN_RISE_PTS})`,
+      reason: `10s move ${sign}${movePts.toFixed(2)} pts is under ${NINE_FIFTEEN_SAME_DIRECTION_MIN_PTS} — no trade`,
     };
   }
-  if (movePts + 1e-9 < NINE_FIFTEEN_MIN_DROP_PTS) {
-    return {
-      action: "skip",
-      reason:
-        `Red but drop too small at the 10s mark (−${movePts.toFixed(2)} pts · need at least −${NINE_FIFTEEN_MIN_DROP_PTS})`,
-    };
-  }
-  return { action: "enter", leg: "PE_BUY", movePts };
+  if (gap < -1e-9 && move < 0) return { action: "enter", leg: "PE_BUY", movePts };
+  if (gap > 1e-9 && move > 0) return { action: "enter", leg: "CE_BUY", movePts };
+  const gapSign = gap > 0 ? "up" : gap < 0 ? "down" : "flat";
+  const moveSign = move > 0 ? "up" : "down";
+  return {
+    action: "skip",
+    reason: `Gap is ${gapSign} ${Math.abs(gap).toFixed(2)} pts and the 10s move is ${moveSign} — they do not point the same way`,
+  };
+}
+
+/** True when Nifty has moved 15 points from the 9:15:11 fill in the trade's direction. */
+export function shouldExitNineFifteenIndexTarget(
+  leg: TradeLeg | null,
+  entrySpot: number,
+  spot: number,
+  points = NINE_FIFTEEN_INDEX_EXIT_PTS,
+): boolean {
+  if (leg !== "PE_BUY" && leg !== "CE_BUY") return false;
+  if (!(entrySpot > 0) || !(spot > 0) || !(points > 0)) return false;
+  if (leg === "PE_BUY") return spot <= entrySpot - points + 1e-9;
+  return spot >= entrySpot + points - 1e-9;
 }
 
 /* The 9:15 exit ladder lives further down, next to the 9:16 one it mirrors. */
@@ -1311,6 +1333,27 @@ export function shouldExitNineFifteenTrailingPnl(lockedStopPct: number, pnlPct: 
   return pnlPct < lockedStopPct;
 }
 
+/** 9:15 immediate market exit when option P&L touches this loss. */
+export const NINE_FIFTEEN_LOSS_EXIT_PCT = 15;
+/** Resting SL-M on the 9:15 entry premium, placed the moment the buy fills. */
+export const NINE_FIFTEEN_STOP_LOSS_PCT = 20;
+
+/** True when live 9:15 P&L has touched −15% (or worse). */
+export function shouldExitNineFifteenLossPct(pnlPct: number | null): boolean {
+  if (pnlPct == null || !Number.isFinite(pnlPct)) return false;
+  return pnlPct <= -NINE_FIFTEEN_LOSS_EXIT_PCT + 1e-9;
+}
+
+/** SL-M trigger for a long option: entry × (1 − 20%), on the ₹0.05 tick. */
+export function nineFifteenStopLossTriggerPrice(
+  entryPrice: number,
+  stopLossPct = NINE_FIFTEEN_STOP_LOSS_PCT,
+): number {
+  if (!(entryPrice > 0) || !(stopLossPct > 0) || stopLossPct >= 100) return 0;
+  const raw = entryPrice * (1 - stopLossPct / 100);
+  return Math.round(roundToOptionTick(raw) * 100) / 100;
+}
+
 export function getNineFifteenPnlTrailScheduleLabel(): string {
   const tiers = NINE_FIFTEEN_PNL_TRAIL_RUNGS.map(
     (rung) => `+${rung.targetPct}→lock+${rung.lockPct}%`,
@@ -1384,8 +1427,8 @@ export function shouldExitNineFifteenTakeProfit(
 }
 
 /**
- * @deprecated The live 9:16 leg no longer has a take-profit or market backup — it exits on the
- * Nifty trail. Kept for scripts/check-916-trailing-pnl.ts.
+ * True when live P&L has reached the 9:16 limit aim. The live leg rests the limit on Kite
+ * instead of market-selling at this level.
  */
 export function shouldExitNineSixteenTakeProfit(
   unrealisedPnl: number | null,
@@ -1412,6 +1455,7 @@ export type NineFifteenExitVia =
   | "limit"
   | "market"
   | "trail-stop"
+  | "loss-stop"
   | "hard-stop"
   | "eod"
   | "flat-on-kite";
@@ -1439,7 +1483,9 @@ export function formatNineFifteenExitSummary(input: {
         ? `trailing stop (floor +${tpPct}% on deployed capital)`
         : input.via === "market"
           ? `market exit (+${tpPct}% backup)`
-          : input.via === "hard-stop"
+          : input.via === "loss-stop"
+            ? `stop loss (P&L touched −${NINE_FIFTEEN_LOSS_EXIT_PCT}% · market)`
+            : input.via === "hard-stop"
             ? "hard stop (market)"
             : input.via === "flat-on-kite"
               ? "position already flat on Kite (closed outside the bot)"
@@ -1510,7 +1556,7 @@ export function getNineFifteenLadderLabel(dateIst?: string, leg?: string | null)
   void dateIst;
   void leg;
   return (
-    `trailing P&L from +${NINE_FIFTEEN_PNL_TRAIL_FIRST_TARGET_PCT}% (option WS tick · ratchet targets · exit on stop floor) · @ 9:15:57 if not in profit and Nifty ≥${NINE_SIXTEEN_MIN_915_ABS_DIFF} pts against vs 9:15 open → market exit for 9:16 · hard stop ±${NINE_SIXTEEN_HARD_STOP_INDEX_POINTS} from ${getHardStopStartLabel()} · 3:25 PM square-off`
+    `exit at ${NINE_FIFTEEN_INDEX_EXIT_PTS} Nifty pts from the 9:15:11 fill (PE down · CE up) · P&L −${NINE_FIFTEEN_LOSS_EXIT_PCT}% immediate market exit · SL-M −${NINE_FIFTEEN_STOP_LOSS_PCT}% on the entry premium · open stop · @ 9:15:57 if not in profit and Nifty ≥${NINE_SIXTEEN_MIN_915_ABS_DIFF} pts against vs 9:15 open → market exit for 9:16 · hard stop ±${NINE_SIXTEEN_HARD_STOP_INDEX_POINTS} from ${getHardStopStartLabel()} · 3:25 PM square-off`
   );
 }
 
@@ -1522,31 +1568,20 @@ export const NINE_SIXTEEN_TAKE_PROFIT_PCT_EARLY = 5;
 export const NINE_SIXTEEN_CE_TAKE_PROFIT_PCT = 3;
 
 /**
- * @deprecated The live 9:16 leg now exits on the Nifty trail ({@link armNineSixteenTrail}), not a
- * limit sell. Kept for scripts/check-916-trailing-pnl.ts.
- *
- * 9:16 limit-sell % on deployed capital. Same for PE and CE.
- * Same colour = 9:16:00 open keeps the 9:15 colour; different colour = open gaps against it.
+ * 9:16 limit-sell % on the entry premium. Same for PE and CE, placed the moment the entry fills.
+ * `sameColor` is ignored — the weekday alone sets the aim.
  */
-export function getNineSixteenTakeProfitPct(dateIst?: string, sameColor = false): number {
+export function getNineSixteenTakeProfitPct(dateIst?: string, _sameColor = false): number {
   const weekday = dateIst ? istWeekdayShortFromDateKey(dateIst) : "";
-  const row =
-    weekday === "Wed"
-      ? { same: 3, different: 2 }
-      : weekday === "Thu"
-        ? { same: 6, different: 4 }
-        : weekday === "Fri"
-          ? { same: 9, different: 6 }
-          : weekday === "Mon"
-            ? { same: 10, different: 7 }
-            : { same: 10, different: 8 };
-  return sameColor ? row.same : row.different;
+  if (weekday === "Wed") return 3;
+  if (weekday === "Thu") return 4;
+  if (weekday === "Fri") return 5;
+  if (weekday === "Mon") return 6;
+  return 7;
 }
 
 export function describeNineSixteenTakeProfitSchedule(): string {
-  return (
-    "PE and CE · same colour / different colour — Wed 3% / 2% · Thu 6% / 4% · Fri 9% / 6% · Mon 10% / 7% · Tue 10% / 8%"
-  );
+  return "PE and CE · Wed 3% · Thu 4% · Fri 5% · Mon 6% · Tue 7% · limit sell at the fill";
 }
 
 export function getNineSixteenLadderLabel(
@@ -1554,16 +1589,15 @@ export function getNineSixteenLadderLabel(
   leg?: TradeLeg | null,
   sameColor?: boolean,
 ): string {
-  void dateIst;
   void sameColor;
-  const sign = leg === "CE_BUY" ? "+" : "−";
+  const pct = getNineSixteenTakeProfitPct(dateIst);
   const adverse =
     leg === "CE_BUY" || leg === "PE_BUY"
       ? getHybrid916AdverseScheduleLabel(leg)
       : `hard stop ±${NINE_SIXTEEN_HARD_STOP_INDEX_POINTS} from ${getHardStopStartLabel()}`;
   return (
-    `no limit sell · Nifty target ${sign}${NINE_SIXTEEN_HYBRID_INDEX_TARGET_RED_CONFIRM}/${sign}${NINE_SIXTEEN_HYBRID_INDEX_TARGET_GREEN_GAP} ` +
-    `starts the trail (${getNineSixteenTrailScheduleLabel()}) · until then ${adverse} · 3:25 PM square-off`
+    `limit sell +${pct}% on the entry premium · ${adverse} · ` +
+    `${NINE_SIXTEEN_MINUTE_SPIKE_PTS}-pt minute spike · 3:25 PM square-off`
   );
 }
 

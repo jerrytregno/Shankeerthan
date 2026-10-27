@@ -3,7 +3,7 @@
  *
  * Baseline = the 9:16 backtesting pages: red 9:15 (|Δ| ≥ 15) → PE, green → CE, entry at the
  * 9:16 open, flat 12 (9:16 open keeps the 9:15 colour) / 8 (gap against it) Nifty target,
- * 40 points against at the 9:26 (PE) / 9:17 (CE) bar open, a minute that runs 25 pts
+ * 40 points against at the 9:26 (PE) / 9:17 (CE) bar open, a minute that runs 35 pts
  * against its own open is a loss, otherwise
  * out at that checkpoint if in profit, or later at the entry price.
  *
@@ -132,9 +132,9 @@ function buildTrades(raw: RawDay[]): { sessions: string[]; trades: Trade[] } {
   return { sessions, trades };
 }
 
-const MINUTE_SPIKE = 25;
+const MINUTE_SPIKE = 35;
 
-/** First minute that runs 25 pts against its own open before the flat target. */
+/** First minute that runs 35 pts against its own open before the flat target. */
 function minuteSpikeBeforeTarget(t: Trade): number | null {
   const targetPx = t.entry + t.dir * t.target;
   for (const b of t.bars) {
@@ -181,7 +181,7 @@ function pageWin(t: Trade): boolean {
     } else if (returnBar && returnBar.m === spikeMin) {
       const dist = t.side === "PE" ? returnBar.o - t.entry : t.entry - returnBar.o;
       if (dist <= MINUTE_SPIKE + 1e-9) {
-        /* return is closer to the open than the 25-pt spike */
+        /* return is closer to the open than the 35-pt spike */
       } else {
         return false;
       }

@@ -57,29 +57,14 @@ The first order attempt uses this strike even if Nifty has moved a little since 
 
 ### 1.3 Step 3: read the direction at 9:15:10
 
-The bot compares the mark (last tick before 9:15:10) with the open:
+Yesterday's 15:30 close and the first 10 seconds must point the same way, and the 10-second move must already be 15 points. Entry is 9:15:11. The exit is 15 Nifty points from the price at that fill (PE down, CE up).
 
-| Read at 9:15:10 | Rule | Result |
+| Yesterday close vs today's open | First 10 seconds | Result |
 |---|---|---|
-| Red, drop ≥ 10 points | open − mark ≥ 10 | Buy ATM **PE** at 9:15:11 |
-| Green, rise ≥ 10 points | mark − open ≥ 10 | Buy ATM **CE** at 9:15:11 |
-| Red but drop < 10 | | No 9:15 trade |
-| Green but rise < 10 | | No 9:15 trade |
-| Flat (mark = open) | | No 9:15 trade |
-
-Red and green both need a 10-point move.
-
-> Examples (open = 24,000.00):
->
-> | Mark (last tick before 9:15:10) | Move | Decision |
-> |---|---|---|
-> | 23,989.50 | Red by 10.50 | **Buy PE** |
-> | 23,990.00 | Red by exactly 10.00 | **Buy PE** (10 is enough) |
-> | 23,993.50 | Red by 6.50 | No trade |
-> | 24,011.20 | Green by 11.20 | **Buy CE** |
-> | 24,010.00 | Green by exactly 10.00 | **Buy CE** (10 is enough) |
-> | 24,007.00 | Green by 7.00 | No trade (green needs 10) |
-> | 24,000.00 | Flat | No trade |
+| Opened down | Still falling, 15 points or more | Buy ATM **PE** |
+| Opened up | Still rising, 15 points or more | Buy ATM **CE** |
+| Opposite ways | Either direction | No 9:15 trade |
+| Same way | Move under 15 points | No 9:15 trade |
 
 ### 1.4 Step 4: sizing (how many lots)
 
@@ -174,6 +159,14 @@ A tick exactly at the open does not exit. This runs from the fill onward, alongs
 >
 > Example (CE): 9:15 open 22,671.30. The bot buys a call. If a later tick is 22,671.25, the call is sold at market.
 
+### 1.10.2 Exit: P&L −15% and the −20% stop-loss order
+
+On every option LTP websocket tick, if unrealised P&L touches **−15%** of the premium paid, the bot market-sells immediately.
+
+The moment the 9:15 buy fills, the bot also rests an **SL-M** sell at **entry premium × 0.80** (20% below the fill, rounded to ₹0.05), in the same NRML product. A rejection is sent again immediately. The −15% exit cancels that order and sells at market. The SL-M is the backstop if the bot misses the tick. The trailing profit ladder still runs; this loss stop does not replace it.
+
+> Example: entry premium ₹100. The SL-M trigger is ₹80. If the option LTP prints ₹85 (−15%), the bot cancels ₹80 and sells at market on that tick.
+
 ### 1.11 Exit 4: hard stop (from 10:00 AM)
 
 From 10:00 AM, the bot exits at market if Nifty has moved **30 points against** the trade, measured from the entry spot:
@@ -261,75 +254,33 @@ Kite blocks margin for a market buy about 3% above the last price, so a full-bal
 
 The moment the entry fills, a resting **limit sell** is placed at:
 
-**limit price = entry price × (1 + take-profit %), rounded to the nearest ₹0.05**
+**limit price = entry price × (1 + weekday %), rounded to the nearest ₹0.05**
 
-Same percentage for PE and CE. Same colour means the 9:16:00 open keeps the 9:15 colour (PE: open ≤ 9:15:59 close · CE: open ≥ 9:15:59 close). Different colour is the gap the other way.
+Same percentage for PE and CE. The 9:16 colour does not change the aim.
 
-| 9:16 colour vs 9:15 | Mon | Tue | Wed | Thu | Fri |
-|---|---|---|---|---|---|
-| **Same colour** | 10% | 10% | 3% | 6% | 9% |
-| **Different colour** | 7% | 8% | 2% | 4% | 6% |
-
-> Example (Tuesday, same colour, either PE or CE): entry ₹64.75 × 1,625 qty (25 lots) = ₹1,05,219 deployed. Limit = 64.75 × 1.10 = 71.225 → **₹71.25**.
-
-If Kite rejects the limit order, the bot retries straight away, up to 15 attempts.
-
-### 2.7 Exit 2: market backup
-
-This works the same as the 9:15 trade. If unrealised P&L reaches the target % but the limit hasn't filled, the bot cancels the limit and sells at market.
-
-### 2.8 Exit 3: parallel Nifty index exit (market sell)
-
-This runs at the same time as the take-profit limit; whichever is hit first closes the trade. It watches the Nifty index, not the option price.
-
-Three reference ticks decide the target:
-
-- **9:15:59 close:** the last Nifty tick inside the 9:15:59 second.
-- **9:16:00 open:** the first Nifty tick inside the 9:16:00 second.
-- **9:16:59 close:** the last Nifty tick inside the 9:16:59 second.
-
-Any difference counts, even 0.05: an open slightly below the 9:15:59 close is red, slightly above is green. An open exactly equal to the 9:15:59 close counts as the same colour as the 9:15 candle for that trade (the 12-point tier).
-
-#### PE trade (red 9:15)
-
-| Condition | Target |
+| Weekday | Take-profit |
 |---|---|
-| 9:16:00 open ≤ 9:15:59 close (both candles red) | Nifty ≤ entry spot **− 12**, until a tick above the 9:15:59 close, then **− 8** |
-| 9:16:00 open > 9:15:59 close (green gap at 9:16) | Nifty ≤ entry spot **− 8** until 9:17:00 |
+| Wednesday | 3% |
+| Thursday | 4% |
+| Friday | 5% |
+| Monday | 6% |
+| Tuesday | 7% |
 
-**Same-colour open (−12):** any later Nifty websocket tick that trades **above the 9:15:59 close** — including the first tick after the 9:16:00 entry — moves the index aim to entry spot **− 8** and replaces the limit sell at that weekday's different-colour %. A print equal to the 9:15:59 close does not flip it.
+> Example (Tuesday, either PE or CE): entry ₹64.75 × 1,625 qty (25 lots) = ₹1,05,219 deployed. Limit = 64.75 × 1.07 = 69.2825 → **₹69.30**.
 
-**Gap open (−8):** from 9:17:00, if the 9:16 minute closed green (9:16:59 close > 9:15:59 close), the target moves to Nifty ≤ entry spot **− 6**.
+If Kite rejects the limit, the bot sends it again immediately, and keeps doing that while the leg is open and no limit is resting. A later market exit (35-pt spike, 40-pt checkpoint, entry return, or 3:25 PM) cancels this order first.
 
-> Example (Tuesday PE, both red):
-> - 9:15:59 close = 22,000. 9:16:00 open = 21,999, so both are red. Aim is **−12** and the limit is **+10%**.
-> - The next tick prints 22,001, above the 9:15:59 close. On that tick the aim becomes **−8** and the limit is replaced at **+8%**.
+There is no market backup that sells because option P&L has reached the same %. The resting limit is the profit fill.
 
-#### CE trade (green 9:15), the mirror image
+### 2.7 Nifty trailing profit — removed
 
-| Condition | Target (until 9:17:00) |
-|---|---|
-| 9:16:00 open ≥ 9:15:59 close (both candles green) | Nifty ≥ entry spot **+ 12** |
-| 9:16:00 open < 9:15:59 close (red gap at 9:16) | Nifty ≥ entry spot **+ 8** |
+The 9:16 leg no longer trails Nifty (no target − 2 lock, no best-close − 4 ratchet, no 10:00 flat). Profit is only the weekday limit sell in section 2.6.
 
-**Until 9:17:** same-colour open is +12 (a print below the 9:15:59 close moves it to +8 and switches the limit, including right after entry). A gap open is +8.
+### 2.8 Nifty index target — removed
 
-**From 9:17:** the CE index aim is the Nifty entry spot only. +12, +8 and +6 stop. Market sell when Nifty is at or above the entry spot.
+The ±12 / ±8 / ±6 index targets, the colour-flip retarget, and the CE entry-spot aim from 9:17 are not live exits. They do not replace or reprice the limit sell.
 
-> Example (CE, both green):
-> - 9:15:59 close = 24,018.00. 9:16:00 first tick = 24,019.00, so both candles are green.
-> - Entry spot at fill = 24,020.00, so until 9:17 the **target is 24,032.00** (+12).
-> - From 9:17 the aim is **24,020.00**, the entry spot. A print at or above that sells at market.
-
-Why the target shrinks: when the second candle goes against the trade, the move is weaker, so the bot settles for a smaller, quicker index target.
-
-Edge cases:
-
-- If a CE is already at or above its entry spot at 9:17:00, the entry-spot exit fires on that tick.
-- If no Nifty tick arrives in the 9:16:00 second, the bot uses the entry spot as the 9:16 open.
-- If no Nifty tick arrives in the 9:15:59 second, the index exit isn't armed for that day. The trade then relies on the take-profit, market backup, hard stop and 3:25 PM exits. This is rare, because Nifty normally ticks several times a second.
-
-### 2.9 Exit 4: adverse checkpoint + entry return (not the 10:00 hard stop)
+### 2.9 Exit 2: adverse checkpoint + entry return (not the 10:00 hard stop)
 
 On the **first Nifty websocket tick** at or after the checkpoint second:
 
@@ -340,22 +291,22 @@ If the 40-point stop does **not** fire at that tick, the bot arms **entry return
 
 Runs alongside the take-profit limit and parallel index exit; the first to trigger wins. The 9:15 leg still uses the **10:00 AM ±30** hard stop; the 9:16 leg does not.
 
-### 2.9.1 Minute spike — 25 points against the current minute
+### 2.9.1 Minute spike — 35 points against the current minute
 
-On every Nifty websocket tick while the 9:16 leg is open, the bot keeps the **first tick of the current IST minute** as that minute's open. If a later tick in the same minute is **25 points against that open**, it sells at market immediately.
+On every Nifty websocket tick while the 9:16 leg is open, the bot keeps the **first tick of the current IST minute** as that minute's open. If a later tick in the same minute is **35 points against that open**, it sells at market immediately.
 
-- **PE:** Nifty ≥ minute open **+ 25**
-- **CE:** Nifty ≤ minute open **− 25**
+- **PE:** Nifty ≥ minute open **+ 35**
+- **CE:** Nifty ≤ minute open **− 35**
 
-The next minute's first tick becomes the new open, and the 25 points start again. This runs for the whole 9:16 trade, including after the trail is armed. Whichever exit the tick hits first closes the leg.
+The next minute's first tick becomes the new open, and the 35 points start again. This runs for the whole 9:16 trade. A spike cancels the resting limit and sells at market.
 
-### 2.10 Exit 5: 3:25 PM square-off
+### 2.10 Exit 3: 3:25 PM square-off
 
 Any 9:16 position still open at 3:25 PM is sold at market.
 
 ### 2.11 How an exit actually fires (both trades)
 
-- Parallel index exit, adverse checkpoint, and entry return are checked on **every Nifty websocket tick**, about 4 a second. A separate **1-second safety check** repeats them even if the rest of the bot stalls. They never wait behind a Kite request.
+- The 35-pt minute spike, adverse checkpoint, and entry return are checked on **every Nifty websocket tick**, about 4 a second. A separate **1-second safety check** repeats them even if the rest of the bot stalls. They never wait behind a Kite request. The weekday limit itself rests on Kite and fills without a market sell.
 - On the tick that crosses the level, the bot cancels the take-profit limit and sells the **whole position at market** in parallel orders (max 25 lots each, up to 9 at once). Fills are checked every 0.2 seconds.
 - If the take-profit limit was confirmed unfilled within the last 3 seconds and Kite accepted the cancel, the sell goes out without waiting for a holdings check. Holdings are verified straight after, and if a fill slipped in and the account ends up short, the excess is bought back at once.
 - Kite read requests (orders, positions, quotes) give up after 6 seconds per attempt and retry, so a stuck request can't freeze the bot.
@@ -365,12 +316,12 @@ Any 9:16 position still open at 3:25 PM is sold at market.
 
 1. 9:15 open 24,000.00, 9:15 close (last tick before 9:16:00) 23,980.00, so Δ = −20, red, and |Δ| ≥ 15. Buy PE.
 2. 9:15:58: ATM 24000 CE and PE are resolved and subscribed.
-3. 9:16:00 first Nifty tick is 23,978.50, which is ≤ the 9:15:59 close of 23,980.00, so both candles are red and the index tier is −12.
+3. 9:16:00 first Nifty tick is 23,978.50, which is ≤ the 9:15:59 close of 23,980.00, so the 9:15 candle is red and the bot buys PE.
 4. 9:16:01.000: the latest PE websocket price is ₹64.75, so it sizes on 64.75 × 1.03 and sends a market buy. Fills at an average of ₹64.75: 25 lots = 1,625 qty.
-5. Entry spot at fill is 23,976.00, so the index target is 23,964.00.
-6. Take-profit limit (Tuesday, same colour, 10%): 64.75 × 1.10 → **₹71.25**.
-7. Nifty stays at or below the 9:15:59 close of 23,980.00, so the −12 aim is not reduced. Any tick above 23,980.00 would have moved the aim to −8 and the limit to 8% on that tick. The 9:16:59 last tick is 23,972.00, so the gap-open −6 rule also does not apply.
-8. 9:19: Nifty touches 23,964.00 before the option reaches ₹71.25, so the index exit fires. The bot cancels the take-profit limit and sells at market.
+5. Entry spot at fill is 23,976.00. That spot is the reference for the 40-pt checkpoint and entry return.
+6. Take-profit limit (Tuesday, 7%): 64.75 × 1.07 → **₹69.30**, placed the moment the fill is known.
+7. The option has to trade at ₹69.30 for the limit to fill. A Nifty move of 12 points does not sell the leg.
+8. If a minute prints 35 points against its own open, or the 9:26 checkpoint is 40 points adverse, the bot cancels ₹69.30 and sells at market.
 
 ---
 
@@ -390,7 +341,7 @@ Enabled when the server flag is on (default on unless `FADE_1405_ENABLED=0`). Us
 - **Nifty trail on every tick:** initial stop **25** points against the entry spot; once **+5** in favour, trail **4** points behind the best favourable move with floor **+5**; hard cap **+10** on Nifty points; if still open, **flat at 3:20 PM** on the index schedule used in backtest.
 - **3:25 PM** market square-off if anything is still open (bot-wide cutoff).
 
-There is **no** 9:16-style take-profit limit or ±12/±8 index target on this leg.
+There is **no** weekday option-premium limit on this leg. It uses the Nifty trail above.
 
 ---
 
@@ -404,10 +355,10 @@ There is **no** 9:16-style take-profit limit or ±12/±8 index target on this le
 | Entry time | 9:15:11 (order ~9:15:12) | 9:16:01 | ~14:06 |
 | Entry order | Market buy | Market buy (latest WS price + 3% sizing cushion) | Market buy |
 | Margin retries until | 9:15:15 (top-ups until 9:15:20) | 9:16:30 | Same burst pattern in 14:06 window |
-| PE take-profit | trailing ladder from +3% | weekday × same/different colour (section 2.6) | Nifty trail only |
-| CE take-profit | trailing ladder from +3% | same table as PE (section 2.6) | Nifty trail only |
-| Market backup | Yes, same % | Yes, same % | No TP limit — Nifty trail |
-| Index exit | No | Yes: ∓12 / ∓8, then ∓6 from 9:17 | Trail 25/5/4/10 + 3:20 flat |
+| PE take-profit | 15 Nifty pts down from the 9:15:11 fill | weekday limit: Wed 3 · Thu 4 · Fri 5 · Mon 6 · Tue 7 (section 2.6) | Nifty trail only |
+| CE take-profit | 15 Nifty pts up from the 9:15:11 fill | same weekday limit as PE (section 2.6) | Nifty trail only |
+| Market backup | Yes, same % | No — the limit is the fill | No TP limit — Nifty trail |
+| Index exit | No | No — 35-pt spike and 40-pt checkpoint only | Trail 25/5/4/10 + 3:20 flat |
 | Small-body exit | Yes, at 9:16:01 if 9:15 body < 5 | No | No |
-| Hard stop / adverse | From 10:00, 30 points against | PE @ 9:26 · CE @ 9:17: 40 pts adverse, else entry return | Initial 25-pt Nifty stop only |
+| Hard stop / adverse | P&L −15% immediate market exit · SL-M −20% from the fill · from 10:00, 30 points against | PE @ 9:26 · CE @ 9:17: 40 pts adverse, else entry return | Initial 25-pt Nifty stop only |
 | Force exit | 3:25 PM | 3:25 PM | 3:25 PM (3:20 trail flat in backtest) |

@@ -9,10 +9,14 @@ import type {
 
 type OutcomeFilter = "all" | NineFifteenHighMinus5Outcome;
 
-function outcomeLabel(outcome: NineFifteenHighMinus5Outcome, signalMinute = "9:15"): string {
+function outcomeLabel(
+  outcome: NineFifteenHighMinus5Outcome,
+  signalMinute = "9:15",
+  sameDirection = false,
+): string {
   switch (outcome) {
     case "win":
-      return `Win (in ${signalMinute})`;
+      return sameDirection ? "Win" : `Win (in ${signalMinute})`;
     case "late_win":
       return "Late win";
     case "loss":
@@ -58,9 +62,11 @@ function StatCard({
 function TradeRow({
   trade,
   signalMinute,
+  sameDirection = false,
 }: {
   trade: NineFifteenHighMinus5Trade;
   signalMinute: string;
+  sameDirection?: boolean;
 }) {
   return (
     <tr>
@@ -74,7 +80,7 @@ function TradeRow({
       <td>{trade.tpTimeIst ?? "—"}</td>
       <td>
         <span className={cn("nf915bt-outcome-pill", outcomeClass(trade.outcome))}>
-          {outcomeLabel(trade.outcome, signalMinute)}
+          {outcomeLabel(trade.outcome, signalMinute, sameDirection)}
         </span>
       </td>
     </tr>
@@ -92,6 +98,14 @@ function sessionLabels(slice: NineFifteenHighMinus5BacktestSlice) {
 function accordionMeta(slice: NineFifteenHighMinus5BacktestSlice): string {
   const { signalMinute } = sessionLabels(slice);
   const entered = slice.stats.wins + slice.stats.lateWins + slice.stats.losses;
+  if (slice.rules.sameDirection15) {
+    return [
+      `${slice.stats.wins} win`,
+      `${slice.stats.losses} loss`,
+      `${slice.stats.noEntry} no entry`,
+      `${slice.stats.winRatePct}% TP (${entered} entered)`,
+    ].join(" · ");
+  }
   const parts = [
     `${slice.stats.wins} in ${signalMinute}`,
     `${slice.stats.lateWins} late`,
@@ -129,6 +143,33 @@ function RulesList({
     <section className="nf915bt-rules card">
       <h3>Rules</h3>
       {subtitle && <p className="nf915bt-section-subtitle">{subtitle}</p>}
+      {slice.rules.sameDirection15 ? (
+        <ul>
+          <li>
+            <strong>Both down</strong> — today’s 9:15 open is below yesterday’s close, and the 9:15 candle
+            itself closed at least 15 points lower. Buy PE.
+          </li>
+          <li>
+            <strong>Both up</strong> — today’s 9:15 open is above yesterday’s close, and the 9:15 candle
+            itself closed at least 15 points higher. Buy CE.
+          </li>
+          <li>
+            <strong>Skip</strong> — the gap and the 9:15 candle point opposite ways, or the candle moved
+            under 15 points.
+          </li>
+          <li>
+            <strong>Entry</strong> — the 9:15 close. A 1-minute candle has no 9:15:10 tick, so the candle
+            body stands in for that 10-second read, and the close stands in for the 9:15:11 price.
+          </li>
+          <li>
+            <strong>Take profit</strong> — 15 Nifty points from that close. PE further down, CE further up.
+            Checked from 9:16 through 15:30.
+          </li>
+          <li>
+            <strong>Win</strong> — the 15-point target prints. <strong>Loss</strong> — it never does.
+          </li>
+        </ul>
+      ) : (
       <ul>
         {slice.rules.red915Only && (
           <li>
@@ -180,6 +221,7 @@ function RulesList({
           <strong>Loss</strong> — entry filled, TP never touched through {slice.rules.scanEndIst}.
         </li>
       </ul>
+      )}
       <p className="nf915bt-muted">
         {rangeLabel} · {slice.stats.sessions} sessions
         {slice.stats.excludedSessions != null && slice.stats.excludedSessions > 0
@@ -209,7 +251,9 @@ function BacktestSectionBody({
   const [filter, setFilter] = useState<OutcomeFilter>("all");
   const entered = slice.stats.wins + slice.stats.lateWins + slice.stats.losses;
   const showNoEntry =
-    slice.rules.variant === "limit_open_minus_5" || slice.rules.variant === "limit_open_plus_5";
+    slice.rules.sameDirection15 ||
+    slice.rules.variant === "limit_open_minus_5" ||
+    slice.rules.variant === "limit_open_plus_5";
 
   const filterOptions = useMemo(() => {
     const keys: OutcomeFilter[] = ["all", "win", "late_win", "loss"];
@@ -228,17 +272,23 @@ function BacktestSectionBody({
 
       <section className="nf915bt-stat-grid">
         <StatCard
-          label={`Win (in ${signalMinute})`}
+          label={slice.rules.sameDirection15 ? "Win" : `Win (in ${signalMinute})`}
           value={String(slice.stats.wins)}
-          hint={`${slice.stats.inMinuteWinPct}% of ${entered} entered`}
+          hint={
+            slice.rules.sameDirection15
+              ? `15-pt target hit · ${slice.stats.winRatePct}% of ${entered} entered`
+              : `${slice.stats.inMinuteWinPct}% of ${entered} entered`
+          }
           tone="text-up"
         />
+        {!slice.rules.sameDirection15 && (
         <StatCard
           label="Late win"
           value={String(slice.stats.lateWins)}
           hint={`TP after ${lateWinAfter} — time in table`}
           tone="nf915bt-tone-late"
         />
+        )}
         <StatCard
           label="Loss"
           value={String(slice.stats.losses)}
@@ -249,7 +299,7 @@ function BacktestSectionBody({
           <StatCard
             label="No entry"
             value={String(slice.stats.noEntry)}
-            hint={`Open ${slice.rules.variant === "limit_open_plus_5" ? "+" : "−"} ${slice.rules.entryOffsetFromOpen} never touched`}
+            hint={slice.rules.sameDirection15 ? "Gap and the 9:15 candle did not both qualify" : `Open ${slice.rules.variant === "limit_open_plus_5" ? "+" : "−"} ${slice.rules.entryOffsetFromOpen} never touched`}
           />
         )}
         <StatCard
@@ -272,7 +322,7 @@ function BacktestSectionBody({
                 className={cn("btn btn-sm", filter === key ? "btn-primary" : "btn-ghost")}
                 onClick={() => setFilter(key)}
               >
-                {key === "all" ? "All" : outcomeLabel(key as NineFifteenHighMinus5Outcome, signalMinute)}
+                {key === "all" ? "All" : outcomeLabel(key as NineFifteenHighMinus5Outcome, signalMinute, slice.rules.sameDirection15)}
               </button>
             ))}
           </div>
@@ -301,7 +351,12 @@ function BacktestSectionBody({
                 </tr>
               ) : (
                 filtered.map((trade) => (
-                  <TradeRow key={trade.date} trade={trade} signalMinute={signalMinute} />
+                  <TradeRow
+                    key={trade.date}
+                    trade={trade}
+                    signalMinute={signalMinute}
+                    sameDirection={slice.rules.sameDirection15}
+                  />
                 ))
               )}
             </tbody>

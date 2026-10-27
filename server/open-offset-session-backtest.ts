@@ -178,6 +178,73 @@ function tradeFields(
   };
 }
 
+/** 9:15 body must be at least this far, and the same way as the gap from yesterday's close. */
+const SAME_DIRECTION_MIN_PTS = 15;
+/** Take profit from the 9:15 close. PE further down, CE further up. */
+const SAME_DIRECTION_TP_PTS = 15;
+
+/**
+ * 1-minute stand-in for the live 9:15 rule. The year file has no 9:15:10 tick, so the
+ * 9:15 candle body is that read. Entry is the 9:15 close. TP is 15 points further.
+ */
+export function simulateSameDirection15Day(
+  date: string,
+  signalBar: Pick<MinuteBar, "open" | "high" | "low" | "close">,
+  sessionCandles: Pick<MinuteBar, "mins" | "high" | "low">[],
+  prevClose: number | null,
+  session: OpenOffsetSessionConfig = NIFTY_OPEN_OFFSET_SESSION,
+): NineFifteenHighMinus5Trade {
+  const blank = {
+    date,
+    weekday: weekdayFromDateKey(date),
+    ...tradeFields(signalBar),
+    entryLevel: 0,
+    tpLevel: 0,
+    entryTimeIst: null,
+    entryMins: null,
+    tpTimeIst: null,
+    tpMins: null,
+    outcome: "no_entry" as const,
+  };
+  if (prevClose == null || !(prevClose > 0) || !(signalBar.open > 0)) return blank;
+  const body = signalBar.close - signalBar.open;
+  const gap = signalBar.open - prevClose;
+  const bothDown = gap < -1e-9 && body < -1e-9 && Math.abs(body) + 1e-9 >= SAME_DIRECTION_MIN_PTS;
+  const bothUp = gap > 1e-9 && body > 1e-9 && Math.abs(body) + 1e-9 >= SAME_DIRECTION_MIN_PTS;
+  if (!bothDown && !bothUp) return blank;
+
+  const entryLevel = round2(signalBar.close);
+  const tpLevel = round2(bothDown ? entryLevel - SAME_DIRECTION_TP_PTS : entryLevel + SAME_DIRECTION_TP_PTS);
+  const entryMins = session.sessionOpenMinutes + 1;
+  const ordered = [...sessionCandles]
+    .filter((c) => c.mins > session.sessionOpenMinutes && c.mins <= session.sessionCloseMinutes)
+    .sort((a, b) => a.mins - b.mins);
+
+  for (const bar of ordered) {
+    const hit = bothDown ? bar.low <= tpLevel + 1e-9 : bar.high + 1e-9 >= tpLevel;
+    if (!hit) continue;
+    return {
+      ...blank,
+      entryLevel,
+      tpLevel,
+      entryTimeIst: formatIstHms(entryMins * 60),
+      entryMins,
+      tpTimeIst: formatIstHms(bar.mins * 60),
+      tpMins: bar.mins,
+      outcome: "win",
+    };
+  }
+
+  return {
+    ...blank,
+    entryLevel,
+    tpLevel,
+    entryTimeIst: formatIstHms(entryMins * 60),
+    entryMins,
+    outcome: "loss",
+  };
+}
+
 export function simulateHighMinus5Day(
   date: string,
   signalBar: Pick<MinuteBar, "open" | "high" | "low" | "close">,
@@ -742,6 +809,45 @@ export function buildOpenOffsetFromMinuteMap(
           warnings: [],
         };
 
+  const sameDirectionTrades: NineFifteenHighMinus5Trade[] = [];
+  let priorClose: number | null = null;
+  for (const date of [...byDate.keys()].sort()) {
+    const candles = byDate.get(date);
+    if (!candles) continue;
+    candles.sort((a, b) => a.mins - b.mins);
+    const signalBar = candles.find((c) => c.mins === session.sessionOpenMinutes);
+    const sessionCandles = candles.filter(
+      (c) => c.mins >= session.sessionOpenMinutes && c.mins <= session.sessionCloseMinutes,
+    );
+    if (!signalBar || !isValidSessionDay(sessionCandles, session)) continue;
+    if (sortedDates.includes(date)) {
+      sameDirectionTrades.push(
+        simulateSameDirection15Day(date, signalBar, sessionCandles, priorClose, session),
+      );
+    }
+    priorClose = sessionCandles[sessionCandles.length - 1]!.close;
+  }
+  sameDirectionTrades.sort((a, b) => b.date.localeCompare(a.date));
+  const peTrades = sameDirectionTrades.filter((t) => t.outcome !== "no_entry" && t.change915 < 0);
+  const ceTrades = sameDirectionTrades.filter((t) => t.outcome !== "no_entry" && t.change915 > 0);
+  const sameDirectionRules = {
+    ...baseRules(session, false),
+    sameDirection15: true,
+    entryOffsetFromOpen: SAME_DIRECTION_MIN_PTS,
+    tpOffsetFromEntry: SAME_DIRECTION_TP_PTS,
+    winWindowEndIst: session.scanEndIst,
+    scanEndIst: session.scanEndIst,
+  };
+  const sameDirectionSlice = (
+    label: string,
+    trades: NineFifteenHighMinus5Trade[],
+  ): NineFifteenHighMinus5BacktestSlice => ({
+    label,
+    rules: sameDirectionRules,
+    stats: summarise(trades),
+    trades,
+  });
+
   const emptySlice = (label: string): NineFifteenHighMinus5BacktestSlice => ({
     label,
     rules: baseRules(session, false),
@@ -772,6 +878,11 @@ export function buildOpenOffsetFromMinuteMap(
         ? buildOpenAtOpenSlice(`Enter at ${signalLabel} open · TP open − 10`, openAtOpenTrades, session)
         : emptySlice(`Enter at ${signalLabel} open · TP open − 10`),
     fullDay,
+    sameDirection15: {
+      all: sameDirectionSlice("Same direction · 15 pt move · exit 15 pts", sameDirectionTrades),
+      pe: sameDirectionSlice("Both down · PE · exit 15 pts", peTrades),
+      ce: sameDirectionSlice("Both up · CE · exit 15 pts", ceTrades),
+    },
     warnings,
   };
 }

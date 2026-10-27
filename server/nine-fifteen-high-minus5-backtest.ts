@@ -49,7 +49,7 @@ const DATA_DIR = path.join(__dirname, "..", "data");
 const NIFTY_STORE = {
   cacheFile: path.join(DATA_DIR, "nine-fifteen-high-minus5-backtest.json.gz"),
   metaFile: path.join(DATA_DIR, "nine-fifteen-high-minus5-backtest.meta.json"),
-  cacheVersion: 14,
+  cacheVersion: 15,
   defaultDays: NINE_FIFTEEN_HIGH_MINUS5_DEFAULT_DAYS,
   maxDays: NINE_FIFTEEN_BACKTEST_MAX_SESSIONS,
 };

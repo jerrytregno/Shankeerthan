@@ -522,6 +522,37 @@ export async function fetchOrdersByIds(
   return found;
 }
 
+/** SL-M sell. Trigger is the option premium that turns the order into a market sell. */
+export async function placeRegularSlMarketOrder(
+  accessToken: string,
+  order: {
+    tradingsymbol: string;
+    exchange: string;
+    transaction_type: "BUY" | "SELL";
+    product: string;
+    quantity: number;
+    triggerPrice: number;
+  },
+): Promise<string> {
+  const body = normalizeKiteOrderBody({
+    tradingsymbol: order.tradingsymbol,
+    exchange: order.exchange,
+    transaction_type: order.transaction_type,
+    product: order.product,
+    quantity: order.quantity,
+    order_type: "SL-M",
+    trigger_price: Number(roundToOptionTick(order.triggerPrice).toFixed(2)),
+    variety: "regular",
+    validity: "DAY",
+  });
+  const data = await kitePost<{ order_id: string }>(
+    "/orders/regular",
+    accessToken,
+    body as Record<string, string>,
+  );
+  return data.order_id;
+}
+
 export async function placeRegularLimitOrder(
   accessToken: string,
   order: {

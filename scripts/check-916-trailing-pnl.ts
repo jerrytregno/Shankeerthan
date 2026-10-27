@@ -1,15 +1,16 @@
 /**
- * Sanity checks for the 9:16 take-profit limit exit (replaces the old trailing ladder).
+ * Sanity checks for the 9:16 weekday limit sell (Wed 3 · Thu 4 · Fri 5 · Mon 6 · Tue 7).
  */
 import {
   getNineSixteenTakeProfitPct,
   getNineSixteenLadderLabel,
   nineFifteenTakeProfitLimitPrice,
   nineFifteenTakeProfitAmount,
-  shouldExitNineFifteenTakeProfit,
-  shouldExitNineSixteenTakeProfit,
   formatNineFifteenExitSummary,
   ownLegUnrealisedPnl,
+  pnlPctOfEntryCost,
+  shouldExitNineFifteenLossPct,
+  nineFifteenStopLossTriggerPrice,
 } from "../server/nine-sixteen-logic.js";
 
 const entryPrice = 40;
@@ -29,48 +30,67 @@ function checkWeekday(label: string, dateIst: string, expectedPct: number, sameC
   }
 }
 
-checkWeekday("Wednesday same", "2026-09-02", 3, true);
-checkWeekday("Wednesday different", "2026-09-02", 2, false);
-checkWeekday("Thursday same", "2026-09-03", 6, true);
-checkWeekday("Thursday different", "2026-09-03", 4, false);
-checkWeekday("Friday same", "2026-09-04", 9, true);
-checkWeekday("Friday different", "2026-09-04", 6, false);
-checkWeekday("Monday same", "2026-08-31", 10, true);
-checkWeekday("Monday different", "2026-08-31", 7, false);
-checkWeekday("Tuesday same", "2026-09-01", 10, true);
-checkWeekday("Tuesday different", "2026-09-01", 8, false);
-checkWeekday("Tuesday same CE uses same %", "2026-09-01", 10, true);
+checkWeekday("Wednesday", "2026-09-02", 3, true);
+checkWeekday("Wednesday other colour", "2026-09-02", 3, false);
+checkWeekday("Thursday", "2026-09-03", 4, true);
+checkWeekday("Thursday other colour", "2026-09-03", 4, false);
+checkWeekday("Friday", "2026-09-04", 5, true);
+checkWeekday("Friday other colour", "2026-09-04", 5, false);
+checkWeekday("Monday", "2026-08-31", 6, true);
+checkWeekday("Monday other colour", "2026-08-31", 6, false);
+checkWeekday("Tuesday", "2026-09-01", 7, true);
+checkWeekday("Tuesday other colour", "2026-09-01", 7, false);
 
 {
   const pct = getNineSixteenTakeProfitPct("2026-09-01", true);
+  const limit = nineFifteenTakeProfitLimitPrice(entryPrice, pct);
   const aim = nineFifteenTakeProfitAmount(entryPrice, quantity, pct);
-  const atTarget = ownLegUnrealisedPnl(entryPrice, quantity, nineFifteenTakeProfitLimitPrice(entryPrice, pct));
-  const below = atTarget != null ? atTarget - 1 : null;
-  console.log("\nMarket backup trigger");
-  console.log(`  at limit P&L ₹${Math.round(atTarget ?? 0)} → exit? ${shouldExitNineFifteenTakeProfit(atTarget, entryPrice, quantity, pct)}`);
-  console.log(`  ₹1 below → exit? ${shouldExitNineFifteenTakeProfit(below, entryPrice, quantity, pct)}`);
-  if (!shouldExitNineFifteenTakeProfit(atTarget, entryPrice, quantity, pct)) {
-    throw new Error("market backup should fire at target P&L");
+  if (limit !== 42.8) {
+    throw new Error(`Tuesday limit on ₹40 should be ₹42.80, got ${limit}`);
   }
-  if (shouldExitNineFifteenTakeProfit(below, entryPrice, quantity, pct)) {
-    throw new Error("market backup should not fire below target");
+  if (aim !== entryPrice * quantity * 0.07) {
+    throw new Error(`Tuesday aim should be 7% of deployed capital, got ${aim}`);
   }
-  if (!shouldExitNineSixteenTakeProfit(atTarget, entryPrice, quantity, pct)) {
-    throw new Error("9:16 market backup helper should fire at target P&L");
-  }
+  const atTarget = ownLegUnrealisedPnl(entryPrice, quantity, limit);
   const summary = formatNineFifteenExitSummary({
-    exitPrice: nineFifteenTakeProfitLimitPrice(entryPrice, pct),
+    exitPrice: limit,
     quantity,
     entryPrice,
     pnl: atTarget,
-    via: "market",
+    via: "limit",
     takeProfitPct: pct,
     legTag: "9:16",
   });
-  if (!summary.includes("9:16") || !summary.includes("backup")) {
-    throw new Error(`9:16 exit summary missing leg tag: ${summary}`);
+  if (!summary.includes("9:16") || !summary.includes("limit sell")) {
+    throw new Error(`9:16 limit exit summary missing leg tag: ${summary}`);
   }
+  console.log(`  Tuesday limit ₹${limit.toFixed(2)} · aim ₹${Math.round(aim)}`);
   console.log(`  exit summary: ${summary}`);
+}
+
+{
+  const lossPrice = entryPrice * 0.85;
+  const holdPrice = entryPrice * 0.8501;
+  const atLoss = pnlPctOfEntryCost(ownLegUnrealisedPnl(entryPrice, quantity, lossPrice), entryPrice, quantity);
+  const above = pnlPctOfEntryCost(ownLegUnrealisedPnl(entryPrice, quantity, holdPrice), entryPrice, quantity);
+  if (!shouldExitNineFifteenLossPct(atLoss)) throw new Error("−15% P&L should exit");
+  if (shouldExitNineFifteenLossPct(above)) throw new Error("just above −15% should hold");
+  if (shouldExitNineFifteenLossPct(-14.99)) throw new Error("−14.99% should hold");
+  if (!shouldExitNineFifteenLossPct(-15)) throw new Error("−15% should exit");
+  const trigger = nineFifteenStopLossTriggerPrice(entryPrice);
+  if (trigger !== 32) throw new Error(`−20% trigger on ₹40 should be ₹32, got ${trigger}`);
+  const summary = formatNineFifteenExitSummary({
+    exitPrice: lossPrice,
+    quantity,
+    entryPrice,
+    pnl: ownLegUnrealisedPnl(entryPrice, quantity, lossPrice),
+    via: "loss-stop",
+    legTag: "9:15",
+  });
+  if (!summary.includes("9:15") || !summary.includes("−15%")) {
+    throw new Error(`9:15 loss exit summary: ${summary}`);
+  }
+  console.log(`\n9:15 loss stop · trigger ₹${trigger.toFixed(2)} · ${summary}`);
 }
 
 console.log("\nAll 9:16 take-profit checks passed.");
