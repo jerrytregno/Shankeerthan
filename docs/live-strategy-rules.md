@@ -289,14 +289,14 @@ On the **first Nifty websocket tick** at or after the checkpoint second:
 
 If the 40-point stop does **not** fire at that tick, the bot arms **entry return**: exit at market the instant Nifty touches the entry spot again (PE: spot ≤ entry · CE: spot ≥ entry) on any later websocket tick.
 
-Runs alongside the take-profit limit and parallel index exit; the first to trigger wins. The 9:15 leg still uses the **10:00 AM ±30** hard stop; the 9:16 leg does not.
+Runs alongside the take-profit limit. A trigger cancels the limit and sells at market. The 9:15 leg still uses the **10:00 AM ±30** hard stop; the 9:16 leg does not.
 
-### 2.9.1 Minute spike — 35 points against the current minute
+### 2.9.1 Minute spike — 35 points against the current minute, confirmed on 2 ticks
 
-On every Nifty websocket tick while the 9:16 leg is open, the bot keeps the **first tick of the current IST minute** as that minute's open. If a later tick in the same minute is **35 points against that open**, it sells at market immediately.
+On every Nifty websocket tick while the 9:16 leg is open, the bot keeps the **first tick of the current IST minute** as that minute's open. A later tick **35 points against that open** does not sell by itself. The **next** Nifty tick must still be 35 points against the same open. Then it sells at market. A tick back inside 35 clears the count, so one false print cannot exit.
 
-- **PE:** Nifty ≥ minute open **+ 35**
-- **CE:** Nifty ≤ minute open **− 35**
+- **PE:** two ticks with Nifty ≥ minute open **+ 35**
+- **CE:** two ticks with Nifty ≤ minute open **− 35**
 
 The next minute's first tick becomes the new open, and the 35 points start again. This runs for the whole 9:16 trade. A spike cancels the resting limit and sells at market.
 

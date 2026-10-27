@@ -231,9 +231,10 @@ export default function NineFifteenPage() {
                 </li>
                 <li>
                   <strong>35-pt minute spike</strong> — on every Nifty websocket tick from 9:16, each minute is
-                  measured from its own first tick. The moment Nifty is <strong>35 points against that open</strong>{" "}
-                  (PE: tick ≥ open + 35 · CE: tick ≤ open − 35), <strong>immediate market exit</strong> and the
-                  resting limit is cancelled. The next minute starts the count again from its own first tick.
+                  measured from its own first tick. When Nifty is <strong>35 points against that open</strong>{" "}
+                  (PE: tick ≥ open + 35 · CE: tick ≤ open − 35), the bot waits for a <strong>second tick</strong>{" "}
+                  still beyond 35, then sells at market and cancels the resting limit. One tick is not enough. A
+                  tick back inside 35 clears the count. The next minute starts again from its own first tick.
                 </li>
                 <li>
                   <strong>No Nifty trail and no option P&amp;L ladder on 9:16</strong> — profit is the limit sell
@@ -264,7 +265,7 @@ export default function NineFifteenPage() {
                 </li>
                 <li>
                   <strong>How exits fire</strong> — the limit sell rests on Kite from the fill. The 35-pt minute
-                  spike, the 40-pt checkpoint, and entry return are evaluated on{" "}
+                  spike (2 ticks), the 40-pt checkpoint, and entry return are evaluated on{" "}
                   <strong>every Nifty websocket tick</strong>, plus a <strong>1-second safety check</strong> if the
                   main loop stalls. Those triggers cancel the limit and send a <strong>parallel market sell</strong>{" "}
                   (max 25 lots per order, up to 9 at once); fills are polled every <strong>0.2 s</strong>.
