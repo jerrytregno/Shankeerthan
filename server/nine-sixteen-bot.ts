@@ -89,7 +89,10 @@ import {
   getNineFifteenPnlTrailScheduleLabel,
   NINE_FIFTEEN_PNL_TRAIL_FIRST_TARGET_PCT,
   NINE_SIXTEEN_MINUTE_SPIKE_PTS,
+  NINE_SIXTEEN_MINUTE_SPIKE_CONFIRM_TICKS,
   shouldExitNineSixteenMinuteSpike,
+  advanceNineSixteenMinuteSpikeConfirm,
+  isNineSixteenMinuteSpikeConfirmed,
   NINE_SIXTEEN_CLOSE_SEAL_SEC,
   canAttempt916Entry,
   isIn91600WsOpenSecond,
@@ -381,9 +384,9 @@ interface PersistedBotState {
   hybrid916EntryReturnArmed?: boolean;
   /** 9:16 trail armed at the target touch, so a restart keeps the locked stop. */
   nineSixteenTrail?: NineSixteenTrail;
-  /** IST minute-of-day whose first Nifty tick is the 25-pt spike anchor. */
+  /** IST minute-of-day whose first Nifty tick is the 35-pt spike anchor. */
   nineSixteenMinuteSpikeMinute?: number;
-  /** First Nifty tick of that minute. A later tick 25 pts against it sells at market. */
+  /** First Nifty tick of that minute. Two later ticks 35 pts against it sell at market. */
   nineSixteenMinuteSpikeOpen?: number;
 }
 
@@ -488,19 +491,27 @@ let hybrid916CeEntryAimArmed = false;
 let hybrid916AdverseCheckpointEvaluated = false;
 /** When the checkpoint did not trip the 40-pt stop — exit at market on the next touch of entry spot. */
 let hybrid916EntryReturnArmed = false;
-/** Set by the first Nifty tick at the 9:16 index target. The trail and the 25-pt minute spike can both exit. */
+/** Set by the first Nifty tick at the 9:16 index target. The trail and the 35-pt minute spike can both exit. */
 let nineSixteenTrail: NineSixteenTrail | null = null;
 /** IST minute-of-day of the open below. −1 until the first Nifty tick of the 9:16 leg. */
 let nineSixteenMinuteSpikeMinute = -1;
 /** First Nifty websocket tick in the current minute. */
 let nineSixteenMinuteSpikeOpen: number | null = null;
+/** Consecutive ticks beyond 35 against the minute open. One tick is not an exit. */
+let nineSixteenMinuteSpikeConfirmCount = 0;
+/** Last Nifty tick already counted, so a replay of the same tick cannot confirm. */
+let nineSixteenMinuteSpikeConfirmTickMs = 0;
+let nineSixteenMinuteSpikeConfirmSpot = 0;
 
 function resetNineSixteenMinuteSpike(): void {
   nineSixteenMinuteSpikeMinute = -1;
   nineSixteenMinuteSpikeOpen = null;
+  nineSixteenMinuteSpikeConfirmCount = 0;
+  nineSixteenMinuteSpikeConfirmTickMs = 0;
+  nineSixteenMinuteSpikeConfirmSpot = 0;
 }
 
-/** Anchor the 25-pt stop to the first Nifty tick of each IST minute. */
+/** Anchor the 35-pt stop to the first Nifty tick of each IST minute. */
 function noteNineSixteenMinuteOpen(spot: number, tickMs: number, dateIst: string): void {
   if (tradeSlot !== "nine-sixteen" || (phase !== "in_position" && phase !== "exiting")) return;
   if (spot <= 0) return;
@@ -512,7 +523,35 @@ function noteNineSixteenMinuteOpen(spot: number, tickMs: number, dateIst: string
     minute === open916Minute && capturedOpen916Nifty != null && capturedOpen916Nifty > 0
       ? capturedOpen916Nifty
       : spot;
+  nineSixteenMinuteSpikeConfirmCount = 0;
+  nineSixteenMinuteSpikeConfirmTickMs = 0;
+  nineSixteenMinuteSpikeConfirmSpot = 0;
   saveBotState(dateIst);
+}
+
+/** Count a new Nifty tick toward the 2-tick spike confirm. The same tick is ignored. */
+function noteNineSixteenMinuteSpikeTick(spot: number, tickMs: number): void {
+  if (tradeSlot !== "nine-sixteen" || phase !== "in_position" || !leg) return;
+  if (nineSixteenMinuteSpikeOpen == null || spot <= 0) return;
+  if (tickMs === nineSixteenMinuteSpikeConfirmTickMs && spot === nineSixteenMinuteSpikeConfirmSpot) return;
+  nineSixteenMinuteSpikeConfirmTickMs = tickMs;
+  nineSixteenMinuteSpikeConfirmSpot = spot;
+  const previous = nineSixteenMinuteSpikeConfirmCount;
+  nineSixteenMinuteSpikeConfirmCount = advanceNineSixteenMinuteSpikeConfirm(
+    previous,
+    spot,
+    nineSixteenMinuteSpikeOpen,
+    leg,
+  );
+  if (nineSixteenMinuteSpikeConfirmCount === 1 && previous === 0) {
+    const adverse =
+      leg === "PE_BUY" ? spot - nineSixteenMinuteSpikeOpen : nineSixteenMinuteSpikeOpen - spot;
+    pushLog(
+      `9:16 minute spike pending · Nifty ${spot.toFixed(2)} is ${adverse.toFixed(2)} pts against ` +
+        `minute open ${nineSixteenMinuteSpikeOpen.toFixed(2)} · 1/${NINE_SIXTEEN_MINUTE_SPIKE_CONFIRM_TICKS} ticks`,
+      "warning",
+    );
+  }
 }
 /**
  * Exit attempts on the open 9:16 leg. Only a first attempt on a fresh fill may sell before reading
@@ -1627,6 +1666,7 @@ function handleBotTick(tick: NiftyTick) {
     }
     if (tradeSlot === "nine-sixteen" && phase === "in_position") {
       noteNineSixteenMinuteOpen(tick.lastPrice, tick.receivedAtMs, dateIst);
+      noteNineSixteenMinuteSpikeTick(tick.lastPrice, tick.receivedAtMs);
       maybeRetargetHybrid916Minute(dateIst, tick.receivedAtMs);
       const session = loadKiteSession();
       if (session?.accessToken) {
@@ -3833,13 +3873,14 @@ async function maybeNineSixteenTrailExit(accessToken: string, dateIst: string, n
 }
 
 /**
- * Sell the 9:16 leg the moment this minute's Nifty print is 25 pts against the minute's first tick.
- * The anchor resets on the first tick of the next minute.
+ * Sell the 9:16 leg after two Nifty ticks are 35 pts against the minute's first tick.
+ * One tick is only a pending confirm. The anchor and the count reset on the next minute.
  */
 async function maybeNineSixteenMinuteSpikeExit(accessToken: string): Promise<boolean> {
   if (tradeSlot !== "nine-sixteen" || phase !== "in_position" || squareOffInFlight) return false;
   if (leg !== "PE_BUY" && leg !== "CE_BUY") return false;
   if (lastSpot == null || lastSpot <= 0 || nineSixteenMinuteSpikeOpen == null) return false;
+  if (!isNineSixteenMinuteSpikeConfirmed(nineSixteenMinuteSpikeConfirmCount)) return false;
   if (!shouldExitNineSixteenMinuteSpike(lastSpot, nineSixteenMinuteSpikeOpen, leg)) return false;
   const open = nineSixteenMinuteSpikeOpen;
   const adverse = leg === "PE_BUY" ? lastSpot - open : open - lastSpot;
@@ -3848,7 +3889,8 @@ async function maybeNineSixteenMinuteSpikeExit(accessToken: string): Promise<boo
   await squareOff(
     accessToken,
     `9:16 minute spike · ${hh}:${mm} open ${open.toFixed(2)} · Nifty ${lastSpot.toFixed(2)} is ` +
-      `${adverse.toFixed(2)} pts against (≥${NINE_SIXTEEN_MINUTE_SPIKE_PTS}) · market sell`,
+      `${adverse.toFixed(2)} pts against (≥${NINE_SIXTEEN_MINUTE_SPIKE_PTS}) · ` +
+      `${NINE_SIXTEEN_MINUTE_SPIKE_CONFIRM_TICKS} ticks confirmed · market sell`,
   );
   return true;
 }

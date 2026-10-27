@@ -59,8 +59,10 @@ export const NINE_SIXTEEN_HYBRID_PE_ADVERSE_CHECK_SEC = 9 * 3600 + 26 * 60;
 export const NINE_SIXTEEN_HYBRID_CE_ADVERSE_CHECK_SEC = 9 * 3600 + 17 * 60;
 export const NINE_SIXTEEN_HYBRID_ADVERSE_STOP_PTS = 40;
 
-/** One 9:16 minute: exit when a Nifty tick runs this far against that minute's own open. */
-export const NINE_SIXTEEN_MINUTE_SPIKE_PTS = 25;
+/** One 9:16 minute: a tick this far against that minute's own open starts the confirm count. */
+export const NINE_SIXTEEN_MINUTE_SPIKE_PTS = 35;
+/** One print beyond 35 is not an exit. The next tick must still be beyond 35. */
+export const NINE_SIXTEEN_MINUTE_SPIKE_CONFIRM_TICKS = 2;
 
 /**
  * True once this tick is at least `points` against the trade from the current minute's open.
@@ -76,6 +78,29 @@ export function shouldExitNineSixteenMinuteSpike(
   if (leg === "PE_BUY") return spot + 1e-9 >= minuteOpen + points;
   if (leg === "CE_BUY") return spot <= minuteOpen - points + 1e-9;
   return false;
+}
+
+/**
+ * Consecutive Nifty ticks beyond the minute-spike band.
+ * A tick back inside the band clears the count, so one false print cannot exit.
+ */
+export function advanceNineSixteenMinuteSpikeConfirm(
+  previousCount: number,
+  spot: number,
+  minuteOpen: number,
+  leg: TradeLeg,
+  points = NINE_SIXTEEN_MINUTE_SPIKE_PTS,
+): number {
+  if (!shouldExitNineSixteenMinuteSpike(spot, minuteOpen, leg, points)) return 0;
+  const prior = Number.isFinite(previousCount) && previousCount > 0 ? previousCount : 0;
+  return prior + 1;
+}
+
+export function isNineSixteenMinuteSpikeConfirmed(
+  confirmCount: number,
+  required = NINE_SIXTEEN_MINUTE_SPIKE_CONFIRM_TICKS,
+): boolean {
+  return confirmCount >= required;
 }
 /** From 3:00 PM IST — exit if Nifty is within this many index points of the ±target level (unused in live bot). */
 export const NINE_SIXTEEN_NEAR_TARGET_EXIT_START_MINUTE = 15 * 60;

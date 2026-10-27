@@ -532,8 +532,8 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
                 <>
                   {" "}
                   This minute opened at <strong>{formatNumber(status.nineSixteenMinuteOpen, 2)}</strong>. Market
-                  sell if Nifty {status.leg === "CE_BUY" ? "≤" : "≥"}{" "}
-                  <strong>{formatNumber(status.nineSixteenMinuteSpikeStop, 2)}</strong> (25 pts against that open).
+                  sell if two Nifty ticks are {status.leg === "CE_BUY" ? "≤" : "≥"}{" "}
+                  <strong>{formatNumber(status.nineSixteenMinuteSpikeStop, 2)}</strong> (35 pts against that open).
                 </>
               )}
             </span>

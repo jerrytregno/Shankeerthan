@@ -246,10 +246,11 @@ export default function NineFifteenPage() {
                   every exit is a <strong>market sell</strong>.
                 </li>
                 <li>
-                  <strong>25-pt minute spike</strong> — on every Nifty websocket tick from 9:16, each minute is
-                  measured from its own first tick. The moment Nifty is <strong>25 points against that open</strong>{" "}
-                  (PE: tick ≥ open + 25 · CE: tick ≤ open − 25), <strong>immediate market exit</strong>. The next
-                  minute starts the count again from its own first tick.
+                  <strong>35-pt minute spike</strong> — on every Nifty websocket tick from 9:16, each minute is
+                  measured from its own first tick. When Nifty is <strong>35 points against that open</strong>{" "}
+                  (PE: tick ≥ open + 35 · CE: tick ≤ open − 35), the bot waits for a <strong>second tick</strong>{" "}
+                  still beyond 35, then sells at market. One tick is not enough. A tick back inside 35 clears the
+                  count. The next minute starts again from its own first tick.
                 </li>
                 <li>
                   <strong>Nifty target — arms the trail, does not sell.</strong> Measured from the Nifty spot at
@@ -323,7 +324,7 @@ export default function NineFifteenPage() {
                   <strong>3:25 PM</strong> force square-off if still open.
                 </li>
                 <li>
-                  <strong>How exits fire</strong> — the 25-pt minute spike, trail stop, and pre-trail guards are evaluated on{" "}
+                  <strong>How exits fire</strong> — the 35-pt minute spike (2 ticks), trail stop, and pre-trail guards are evaluated on{" "}
                   <strong>every Nifty / option websocket tick</strong>, plus a <strong>1-second safety check</strong>{" "}
                   if the main loop stalls. Triggers send a <strong>parallel market sell</strong> (max 25 lots per
                   order, up to 9 at once); fills are polled every <strong>0.2 s</strong>.
