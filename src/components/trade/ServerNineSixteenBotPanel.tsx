@@ -73,9 +73,7 @@ interface BotStatus {
   pnlTrailArmPct?: number;
   pnlTrailStepPct?: number;
   nineFifteenEnabled?: boolean;
-  fade1405Enabled?: boolean;
-  fade1405Settled?: boolean;
-  tradeSlot?: "nine-fifteen" | "nine-sixteen" | "fade-1405";
+  tradeSlot?: "nine-fifteen" | "nine-sixteen";
   nineFifteenMarkPrice?: number | null;
   nineFifteenMarkAt?: string | null;
   nineFifteenMarkChange?: number | null;
@@ -132,7 +130,6 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
   const [status, setStatus] = useState<BotStatus | null>(null);
   const [lastLiveAt, setLastLiveAt] = useState<string | null>(null);
   const [tickView, setTickView] = useState<"seconds" | "raw">("seconds");
-  const [fadeToggleBusy, setFadeToggleBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -182,32 +179,6 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
     return () => window.clearInterval(id);
   }, [inTrade, loadLive]);
 
-  const toggleFade1405 = useCallback(async () => {
-    if (fadeToggleBusy) return;
-    setFadeToggleBusy(true);
-    let nextEnabled = false;
-    setStatus((prev) => {
-      if (!prev) return prev;
-      nextEnabled = !prev.fade1405Enabled;
-      return { ...prev, fade1405Enabled: nextEnabled };
-    });
-    try {
-      const res = await fetch("/api/fade-1405/bot/toggle", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: nextEnabled }),
-      });
-      const json = await res.json();
-      if (res.ok && json.data) setStatus(json.data as BotStatus);
-      else void load();
-    } catch {
-      void load();
-    } finally {
-      setFadeToggleBusy(false);
-    }
-  }, [fadeToggleBusy, load]);
-
   if (!status) return null;
 
   const inPosition = status.phase === "in_position" || status.phase === "exiting";
@@ -238,7 +209,6 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
   const nineFifteenTpPct = status.nineFifteenTakeProfitPct ?? status.nineFifteenTrailArmPct ?? 3;
   const onNineFifteenLeg = status.tradeSlot === "nine-fifteen" && inPosition;
   const onNineSixteenLeg = status.tradeSlot === "nine-sixteen" && inPosition;
-  const onFade1405Leg = status.tradeSlot === "fade-1405" && inPosition;
   const livePnlPct =
     status.pnlPct ??
     (livePnl != null && status.entryPrice != null && status.quantity != null && status.quantity > 0
@@ -323,9 +293,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
           <Server size={18} />
           <div>
             <h2 className="pat-title">Server 9:16 bot (Lightsail)</h2>
-              <p className="pat-sub">
-                9:15 + 9:16 morning · optional 14:05 fade
-              </p>
+              <p className="pat-sub">9:15 + 9:16 morning</p>
           </div>
         </div>
         <div className="pat-head-actions">
@@ -336,23 +304,6 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
           <span className={cn("pat-badge", status.enabled ? "pat-badge--on" : "pat-badge--off")}>
             {status.enabled ? "9:16 armed" : "9:16 off"}
           </span>
-          <span
-            className={cn(
-              "pat-badge",
-              status.fade1405Enabled ? "pat-badge--on" : "pat-badge--off",
-            )}
-          >
-            {status.fade1405Enabled ? "14:05 fade armed" : "14:05 fade off"}
-          </span>
-          <label className="pat-toggle-label">
-            <input
-              type="checkbox"
-              checked={Boolean(status.fade1405Enabled)}
-              disabled={fadeToggleBusy}
-              onChange={() => void toggleFade1405()}
-            />
-            <span>14:05 fade</span>
-          </label>
         </div>
       </header>
 
@@ -360,23 +311,6 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
         <div className="ms-bot-warn ms-bot-warn--hold">
           <strong>9:16 entries are disabled on the server.</strong> Only the 9:15 trade runs — websocket tick
           capture and per-second samples stay active.
-        </div>
-      )}
-
-      {status.fade1405Enabled && (
-        <div className="ms-bot-warn ms-bot-warn--hold">
-          <strong>
-            {onFade1405Leg
-              ? "In the 14:05 fade trade."
-              : status.fade1405Settled
-                ? "14:05 fade settled for today."
-                : "14:05 fade armed for this afternoon."}
-          </strong>{" "}
-          {onFade1405Leg
-            ? "Exit on Nifty trail (25 / 5 / 4 / 10) — not the 9:16 weekday limit sell."
-            : status.fade1405Settled
-              ? "No second 14:05 entry today."
-              : "After morning legs finish, watches 14:05 close for 100+ pts from 9:15 open and range vs yesterday."}
         </div>
       )}
 
@@ -556,14 +490,6 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
         <span className={cn("pat-badge", status.enabled ? "pat-badge--on" : "pat-badge--off")}>
           {status.enabled ? "9:16 armed" : "9:16 off"}
         </span>
-        <span
-          className={cn(
-            "pat-badge",
-            status.fade1405Enabled ? "pat-badge--on" : "pat-badge--off",
-          )}
-        >
-          {status.fade1405Enabled ? "14:05 armed" : "14:05 off"}
-        </span>
         <span className={cn("pat-badge", status.wsConnected ? "pat-badge--open" : "pat-badge--off")}>
           {status.wsConnected ? "Websocket live" : "Websocket off"}
         </span>
@@ -623,9 +549,7 @@ export function ServerNineSixteenBotPanel({ connected: _connected }: { connected
               ? "Live P&L · 9:15 leg (until +15 Nifty pts)"
               : onNineSixteenLeg
                 ? "Live P&L · 9:16 leg (until the limit fills)"
-                : onFade1405Leg
-                  ? "Live P&L · 14:05 fade (Nifty trail exit)"
-                  : "Live P&L (Zerodha)"}
+                : "Live P&L (Zerodha)"}
           </div>
           <div className={cn("pat-pnl-value", livePnl != null && getChangeClass(livePnl))}>
             {livePnl != null ? formatCurrency(livePnl) : "Syncing…"}

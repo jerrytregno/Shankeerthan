@@ -17,15 +17,14 @@ export default function NineFifteenPage() {
               <Clock size={22} />
               9:15 Candle
             </h1>
-            <p className="page-subtitle">9:15 + 9:16 morning legs · optional 14:05 afternoon fade on server</p>
+            <p className="page-subtitle">9:15 + 9:16 morning legs</p>
           </div>
         </header>
 
         <div className="card nf-live-rules">
           <h2 className="nf-live-rules-title">Live strategies — entry &amp; exit rules</h2>
           <p className="nf-live-rules-lead text-muted">
-            Morning 9:15 and 9:16 legs plus an optional <strong>14:05 trend-day fade</strong> on the same bot.
-            Backtests: <a href="/dashboard/fade-1405-backtest">14:05 fade</a> ·{" "}
+            Morning 9:15 and 9:16 legs on the same bot. Backtest:{" "}
             <strong>{NINE_FIFTEEN_RED_916_BACKTEST_TITLE}</strong>.
           </p>
 
@@ -269,41 +268,6 @@ export default function NineFifteenPage() {
                   <strong>every Nifty websocket tick</strong>, plus a <strong>1-second safety check</strong> if the
                   main loop stalls. Those triggers cancel the limit and send a <strong>parallel market sell</strong>{" "}
                   (max 25 lots per order, up to 9 at once); fills are polled every <strong>0.2 s</strong>.
-                </li>
-              </ol>
-            </div>
-
-            <div className="nf-live-rules-col">
-              <h3 className="nf-live-rules-heading">14:05 fade · CE or PE at 14:06</h3>
-              <p className="nf-live-rules-lead text-muted">
-                Separate afternoon leg after the morning session. Exit follows the{" "}
-                <strong>Nifty index trail</strong> (not the 9:16 weekday limit): stop 25, lock once +5, trail 4,
-                cap +10, flat 3:20.
-              </p>
-              <h4 className="nf-live-rules-subheading">Entry (all must pass at 14:05 close)</h4>
-              <ol className="nf-live-rules-list">
-                <li>
-                  Nifty at the <strong>14:05 close</strong> is <strong>≥ 100 points</strong> from the{" "}
-                  <strong>9:15 open</strong> (up or down).
-                </li>
-                <li>
-                  Today&apos;s range from 9:15 through 14:05 is <strong>strictly larger</strong> than{" "}
-                  <strong>yesterday&apos;s full-day</strong> high–low range.
-                </li>
-                <li>
-                  <strong>Fade the move</strong> — if Nifty is 100+ above the open, buy <strong>ATM PE</strong>; if
-                  100+ below, buy <strong>ATM CE</strong>. Entry at the <strong>14:06 open</strong> (websocket tick).
-                </li>
-                <li>Skipped if the morning bot is still in a trade or the 14:06 window is missed.</li>
-              </ol>
-              <h4 className="nf-live-rules-subheading">Exit</h4>
-              <ol className="nf-live-rules-list">
-                <li>
-                  <strong>Nifty trail</strong> — same rules as the{" "}
-                  <a href="/dashboard/fade-1405-backtest">14:05 backtest page</a> (25 / 5 / 4 / 10).
-                </li>
-                <li>
-                  <strong>3:25 PM</strong> square-off if still open (same as other legs).
                 </li>
               </ol>
             </div>

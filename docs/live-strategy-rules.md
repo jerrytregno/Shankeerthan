@@ -8,19 +8,17 @@ All times are IST. "Nifty" means the NIFTY 50 spot index. "WS" means the Zerodha
 
 ## 0. The big picture
 
-The server runs two independent morning trades on the same bot, plus an optional afternoon fade:
+The server runs two independent morning trades on the same bot:
 
-| | 9:15 trade | 9:16 trade | 14:05 fade (optional) |
-|---|---|---|---|
-| What it reads | The first 10 seconds of the 9:15 minute | The full 9:15 minute (open to close) | 14:05 close vs 9:15 open + range vs yesterday |
-| When it buys | 9:15:11 | 9:16:01 | 14:06 (first tick in window) |
-| Signal | Red ≥ 10 / green ≥ 10 vs open | Red/green ≥ 15 on 9:15 candle | 100+ from open **and** today’s range through 14:05 > yesterday full range → **fade** |
-| Order type | Market buy | Market buy | Market buy |
-| Main exit | Trailing P&amp;L ladder on option | Take-profit limit + Nifty index exit | **Nifty index trail** (25 / 5 / 4 / 10) |
+| | 9:15 trade | 9:16 trade |
+|---|---|---|
+| What it reads | The first 10 seconds of the 9:15 minute | The full 9:15 minute (open to close) |
+| When it buys | 9:15:11 | 9:16:01 |
+| Signal | Red ≥ 10 / green ≥ 10 vs open | Red/green ≥ 15 on 9:15 candle |
+| Order type | Market buy | Market buy |
+| Main exit | Trailing P&amp;L ladder on option | Take-profit limit + Nifty index exit |
 
 A day can have no trade, only the 9:15 trade, only the 9:16 trade, or both morning legs one after the other. The two morning legs can never be open together. If the 9:15 trade is still open at 9:16:00, the 9:16 trade is skipped for the day (with one exception, see 1.10).
-
-The **14:05 fade** runs only after the morning session logic has finished for the day (no morning leg still open), if enabled on the server. It never overlaps a morning trade. At most one 14:05 entry per day.
 
 Traps, the later-session strategy, is a separate bot and is currently switched off on the server. It is not covered here.
 
@@ -325,40 +323,20 @@ Any 9:16 position still open at 3:25 PM is sold at market.
 
 ---
 
-## 3. The 14:05 trend-day fade (optional afternoon leg)
+## 3. Quick comparison
 
-Enabled when the server flag is on (default on unless `FADE_1405_ENABLED=0`). Uses the same websocket Nifty feed and the same sizing rules as the morning legs.
-
-### 3.1 Entry (all at 14:05 close, entry at 14:06)
-
-1. **Distance from open:** Nifty at the **14:05 close** is at least **100 points** above or below the **9:15 open** (same open as the morning bot).
-2. **Range expansion:** Today’s high–low from **9:15 through 14:05** is **strictly greater** than **yesterday’s full session** high–low (prior weekday, from Kite 1-minute candles).
-3. **Fade:** If Nifty is 100+ **above** the open → buy **ATM PE**. If 100+ **below** → buy **ATM CE**.
-4. **Timing:** Entry on the **14:06** websocket window (same bot as 9:15/9:16). Skipped if a morning trade is still open, the 14:06 window is missed, or the leg already traded/settled today.
-
-### 3.2 Exit
-
-- **Nifty trail on every tick:** initial stop **25** points against the entry spot; once **+5** in favour, trail **4** points behind the best favourable move with floor **+5**; hard cap **+10** on Nifty points; if still open, **flat at 3:20 PM** on the index schedule used in backtest.
-- **3:25 PM** market square-off if anything is still open (bot-wide cutoff).
-
-There is **no** weekday option-premium limit on this leg. It uses the Nifty trail above.
-
----
-
-## 4. Quick comparison
-
-| | 9:15 trade | 9:16 trade | 14:05 fade |
-|---|---|---|---|
-| Signal | 9:15:10 read vs open | Full 9:15 candle Δ | 14:05 close + range vs yesterday |
-| Red threshold | ≥ 10 points → PE | ≥ 15 points → PE | 100+ below open → CE (fade) |
-| Green threshold | ≥ 10 points → CE | ≥ 15 points → CE | 100+ above open → PE (fade) |
-| Entry time | 9:15:11 (order ~9:15:12) | 9:16:01 | ~14:06 |
-| Entry order | Market buy | Market buy (latest WS price + 3% sizing cushion) | Market buy |
-| Margin retries until | 9:15:15 (top-ups until 9:15:20) | 9:16:30 | Same burst pattern in 14:06 window |
-| PE take-profit | 15 Nifty pts down from the 9:15:11 fill | weekday limit: Wed 3 · Thu 4 · Fri 5 · Mon 6 · Tue 7 (section 2.6) | Nifty trail only |
-| CE take-profit | 15 Nifty pts up from the 9:15:11 fill | same weekday limit as PE (section 2.6) | Nifty trail only |
-| Market backup | Yes, same % | No — the limit is the fill | No TP limit — Nifty trail |
-| Index exit | No | No — 35-pt spike and 40-pt checkpoint only | Trail 25/5/4/10 + 3:20 flat |
-| Small-body exit | Yes, at 9:16:01 if 9:15 body < 5 | No | No |
-| Hard stop / adverse | P&L −15% immediate market exit · SL-M −20% from the fill · from 10:00, 30 points against | PE @ 9:26 · CE @ 9:17: 40 pts adverse, else entry return | Initial 25-pt Nifty stop only |
-| Force exit | 3:25 PM | 3:25 PM | 3:25 PM (3:20 trail flat in backtest) |
+| | 9:15 trade | 9:16 trade |
+|---|---|---|
+| Signal | 9:15:10 read vs open | Full 9:15 candle Δ |
+| Red threshold | ≥ 10 points → PE | ≥ 15 points → PE |
+| Green threshold | ≥ 10 points → CE | ≥ 15 points → CE |
+| Entry time | 9:15:11 (order ~9:15:12) | 9:16:01 |
+| Entry order | Market buy | Market buy (latest WS price + 3% sizing cushion) |
+| Margin retries until | 9:15:15 (top-ups until 9:15:20) | 9:16:30 |
+| PE take-profit | 15 Nifty pts down from the 9:15:11 fill | weekday limit: Wed 3 · Thu 4 · Fri 5 · Mon 6 · Tue 7 (section 2.6) |
+| CE take-profit | 15 Nifty pts up from the 9:15:11 fill | same weekday limit as PE (section 2.6) |
+| Market backup | Yes, same % | No — the limit is the fill |
+| Index exit | No | No — 35-pt spike and 40-pt checkpoint only |
+| Small-body exit | Yes, at 9:16:01 if 9:15 body < 5 | No |
+| Hard stop / adverse | P&L −15% immediate market exit · SL-M −20% from the fill · from 10:00, 30 points against | PE @ 9:26 · CE @ 9:17: 40 pts adverse, else entry return |
+| Force exit | 3:25 PM | 3:25 PM |

@@ -12,7 +12,6 @@ import NiftyOneHourBacktestPage from "@/pages/NiftyOneHourBacktestPage";
 import NiftyRsiBacktestPage from "@/pages/NiftyRsiBacktestPage";
 import NiftyRsiSpeedBacktestPage from "@/pages/NiftyRsiSpeedBacktestPage";
 import WinBacktestPage from "@/pages/WinBacktestPage";
-import Fade1405BacktestPage from "@/pages/Fade1405BacktestPage";
 
 export default function App() {
   return (
@@ -28,7 +27,6 @@ export default function App() {
       <Route path="/dashboard/nifty-rsi" element={<NiftyRsiBacktestPage />} />
       <Route path="/dashboard/nifty-rsi-speed" element={<NiftyRsiSpeedBacktestPage />} />
       <Route path="/dashboard/win-backtest" element={<WinBacktestPage />} />
-      <Route path="/dashboard/fade-1405-backtest" element={<Fade1405BacktestPage />} />
       <Route path="/dashboard/log-test" element={<LogTestPage />} />
       <Route path="/dashboard/trades" element={<TradePage />} />
       <Route path="/dashboard/portfolio" element={<PortfolioPage />} />

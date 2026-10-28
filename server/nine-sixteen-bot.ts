@@ -88,16 +88,6 @@ import {
   type NineSixteenExitMode,
   type NineFifteenExitVia,
 } from "./nine-sixteen-logic.js";
-import {
-  attachFade1405Live,
-  fade1405LiveOnNiftyTick,
-  armFade1405Trail,
-  isFade1405LiveSettled,
-  markFade1405LiveSettled,
-  resetFade1405LiveForDay,
-  setFade1405PrevDayRange,
-} from "./fade-1405-live.js";
-import { type Fade1405Setup } from "./fade-1405-shared.js";
 import { fetchHistoricalCandles } from "./kite-candles.js";
 import { groupSessionBars, isCompleteSession } from "./session-bars.js";
 import { legLabel, type TradeLeg } from "../src/lib/trade-calculations.js";
@@ -187,7 +177,7 @@ export interface RawTickRow {
 }
 
 /** The day runs up to two trades: the 9:15:11 leg, then the 9:16:01 one. */
-export type NineSixteenTradeSlot = "nine-fifteen" | "nine-sixteen" | "fade-1405";
+export type NineSixteenTradeSlot = "nine-fifteen" | "nine-sixteen";
 
 export type NineFifteenTpOrderStatus =
   | "none"
@@ -267,9 +257,6 @@ export interface NineSixteenBotStatus {
   pnlTrailStepPct: number;
   /** The 9:15 leg — armed, read and settled independently of the 9:16 one. */
   nineFifteenEnabled: boolean;
-  /** Afternoon 14:05 trend-day fade (14:06 entry). */
-  fade1405Enabled: boolean;
-  fade1405Settled: boolean;
   /** Which of the day's trades is open, or which one is next. */
   tradeSlot: NineSixteenTradeSlot;
   /** Last Nifty print before 9:15:10 — the read that decides red or green. */
@@ -406,9 +393,6 @@ interface PersistedCaptureState {
 let enabled = true;
 /** The 9:15 leg is always armed on the server. */
 let nineFifteenEnabled = true;
-let fade1405Enabled = process.env.FADE_1405_ENABLED !== "0";
-let fade1405PrevRangeLoaded = false;
-let fade1405PendingDir: 1 | -1 | null = null;
 /** Which of the day's two trades the open position belongs to. */
 let tradeSlot: NineSixteenTradeSlot = "nine-sixteen";
 
@@ -957,6 +941,7 @@ function loadBotState(dateIst: string) {
     const parsed = JSON.parse(fs.readFileSync(STATE_FILE, "utf-8")) as PersistedBotState;
     if (parsed.dateIST !== dateIst) return;
     if ((parsed.tradeSlot as string | undefined) === "ws-trail") return;
+    if ((parsed.tradeSlot as string | undefined) === "fade-1405") return;
     if (parsed.phase !== "in_position" && parsed.phase !== "exiting") return;
     phase = parsed.phase;
     open915 = parsed.open915;
@@ -1545,22 +1530,6 @@ function handleBotTick(tick: NiftyTick) {
     if (isIn91659WsCloseSecond(tick.receivedAtMs)) {
       capturedClose91659 = tick.lastPrice;
       saveCaptures(dateIst);
-    }
-    if (
-      fade1405Enabled &&
-      hasRanToday(dateIst) &&
-      capturedOpen915 != null &&
-      capturedOpen915 > 0
-    ) {
-      const session = loadKiteSession();
-      if (session?.accessToken) {
-        void fade1405LiveOnNiftyTick(
-          tick.lastPrice,
-          istSecondsOfDay(new Date(tick.receivedAtMs)),
-          capturedOpen915,
-          tradeSlot === "fade-1405" && phase === "in_position",
-        ).catch(() => undefined);
-      }
     }
     if (tradeSlot === "nine-sixteen" && phase === "in_position") {
       noteNineSixteenMinuteOpen(tick.lastPrice, tick.receivedAtMs, dateIst);
@@ -2590,10 +2559,6 @@ function concludeTrade(
   note: string,
   type: NineSixteenBotStatus["logs"][number]["type"],
 ) {
-  if (tradeSlot === "fade-1405") {
-    concludeFade1405Trade(dateIst, note, type);
-    return;
-  }
   if (tradeSlot !== "nine-fifteen") {
     finishDay(dateIst, note, type);
     return;
@@ -2890,8 +2855,6 @@ function resetNineFifteenForDay(dateIst: string) {
   if (nineFifteenDate === dateIst) return;
   nineFifteenDate = dateIst;
   tradeSlot = "nine-sixteen";
-  fade1405PrevRangeLoaded = false;
-  resetFade1405LiveForDay();
   nineFifteenMarkPrice = null;
   nineFifteenMarkAtLabel = null;
   nineFifteenSettled = false;
@@ -3297,34 +3260,6 @@ async function tryEnterNineFifteen(accessToken: string, dateIst: string) {
   );
 }
 
-function concludeFade1405Trade(
-  dateIst: string,
-  note: string,
-  type: NineSixteenBotStatus["logs"][number]["type"],
-) {
-  pushLog(note, type);
-  markFade1405LiveSettled();
-  phase = "done";
-  message = note;
-  tradeSlot = "nine-sixteen";
-  tradingsymbol = null;
-  ownedSymbol = null;
-  quantity = 0;
-  entryPrice = 0;
-  positionLotSize = 0;
-  entrySpot = 0;
-  leg = null;
-  lastOptionPrice = null;
-  unrealisedPnl = null;
-  lockedPnlPct = 0;
-  clearHybrid916IndexExit();
-  resetNineSixteenMinuteSpike();
-  fade1405PendingDir = null;
-  optionInstrumentToken = 0;
-  if (niftyInstrumentToken > 0) setBotTickerInstruments([niftyInstrumentToken]);
-  saveBotState(dateIst);
-}
-
 function addCalendarDaysIst(dateKey: string, days: number): string {
   const d = new Date(`${dateKey}T12:00:00+05:30`);
   d.setDate(d.getDate() + days);
@@ -3371,108 +3306,6 @@ async function loadNineFifteenPrevClose(accessToken: string, dateIst: string) {
     }
   }
   pushLog("9:15 · yesterday 15:30 close not found", "warning");
-}
-
-async function loadFade1405PrevRange(accessToken: string, dateIst: string) {
-  if (fade1405PrevRangeLoaded) return;
-  for (let back = 1; back <= 5; back += 1) {
-    const prev = addCalendarDaysIst(dateIst, -back);
-    const wd = new Date(`${prev}T12:00:00+05:30`).getUTCDay();
-    if (wd === 0 || wd === 6) continue;
-    try {
-      const { candles } = await fetchHistoricalCandles(
-        accessToken,
-        "NSE:NIFTY 50",
-        "minute",
-        `${prev} 09:15:00`,
-        `${prev} 15:30:00`,
-      );
-      const byDate = groupSessionBars(candles as unknown[][]);
-      const bars = byDate.get(prev);
-      if (!bars || !isCompleteSession(bars)) continue;
-      const hi = Math.max(...bars.map((b) => b.high));
-      const lo = Math.min(...bars.map((b) => b.low));
-      setFade1405PrevDayRange(hi - lo);
-      fade1405PrevRangeLoaded = true;
-      pushLog(`14:05 fade · yesterday (${prev}) range ${(hi - lo).toFixed(0)} pts loaded`, "info");
-      return;
-    } catch {
-      /* try an earlier day */
-    }
-  }
-}
-
-async function tryEnterFade1405(accessToken: string, dateIst: string, setup: Fade1405Setup) {
-  if (phase === "in_position" || phase === "exiting") return;
-  phase = "entering";
-  tradeSlot = "fade-1405";
-  fade1405PendingDir = setup.dir;
-  const nextLeg = setup.side === "CE" ? "CE_BUY" : "PE_BUY";
-  leg = nextLeg;
-  message = "14:05 fade · placing 14:06 entry…";
-  clearFailedEntryAttempt();
-  await assertEgressReadyForEntry();
-
-  try {
-    const resolved = await resolveEntryOption(accessToken, nextLeg, 1, dateIst);
-    if (!resolved) throw new Error("ATM option not found");
-    const { ltp: optionLtp, source: ltpSource } = await resolveMarketEntryLtp(accessToken, resolved);
-    const sizingLtp = optionLtp * MARKET_BUY_SIZING_CUSHION;
-    const sizing = await resolveEntryQuantity(accessToken, resolved.lotSize, sizingLtp, {});
-    if (sizing.lots <= 0 || sizing.quantity <= 0) {
-      throw new Error(
-        `balance too low for 1 lot · need ~₹${Math.ceil(sizing.costPerLot)} · available ₹${Math.floor(sizing.availableBalance)}`,
-      );
-    }
-    const lotChunks = splitLotsIntoOrderChunks(sizing.lots);
-    pushLog(
-      `14:05 fade entry · ${legLabel(nextLeg)} ${resolved.tradingsymbol} · market BUY (${ltpSource} LTP ₹${optionLtp.toFixed(2)}) · ${formatLotSplitLabel(lotChunks)}`,
-      "success",
-    );
-    ownedSymbol = resolved.tradingsymbol;
-    const placed = await placeSplitMarketOrders(accessToken, {
-      tradingsymbol: resolved.tradingsymbol,
-      transaction_type: "BUY",
-      quantities: lotChunks.map((lots) => lots * resolved.lotSize),
-    });
-    const { fills, failures: fillFailures } = await awaitOrderFills(accessToken, placed.orderIds);
-    if (fills.length === 0) {
-      throw fillFailures[0] ?? placed.failures[0] ?? new Error("Entry orders failed");
-    }
-    if (!applyOwnEntryFills(resolved.tradingsymbol, resolved.lotSize, fills)) {
-      throw new Error("No filled quantity");
-    }
-    if (lastSpot != null && lastSpot > 0) entrySpot = lastSpot;
-    else {
-      const spot = await fetchNiftySpot(accessToken);
-      if (spot > 0) {
-        entrySpot = spot;
-        lastSpot = spot;
-      }
-    }
-    tradingsymbol = resolved.tradingsymbol;
-    optionInstrumentToken =
-      resolved.instrumentToken > 0
-        ? resolved.instrumentToken
-        : ((await resolveInstrumentToken("NFO", resolved.tradingsymbol, accessToken)) ?? 0);
-    if (niftyInstrumentToken > 0) {
-      setBotTickerInstruments(
-        optionInstrumentToken > 0 ? [niftyInstrumentToken, optionInstrumentToken] : [niftyInstrumentToken],
-      );
-    }
-    phase = "in_position";
-    if (entrySpot > 0 && fade1405PendingDir != null) {
-      armFade1405Trail(entrySpot, fade1405PendingDir);
-    }
-    message = `14:05 fade in position · Nifty trail (stop 25 · arm +5 · cap +10) · ${setup.setupLabel}`;
-    pushLog(message, "success");
-    saveBotState(dateIst);
-  } catch (err) {
-    const note = err instanceof Error ? err.message : "Entry failed";
-    pushLog(`14:05 fade not taken · ${note}`, "warning");
-    await persistTradeLog(dateIst, "no_entry", `14:05 fade · ${note}`, { exitReason: note });
-    concludeFade1405Trade(dateIst, `14:05 fade · ${note}`, "warning");
-  }
 }
 
 async function tryEnter(accessToken: string, dateIst: string) {
@@ -4014,7 +3847,6 @@ async function maybeNiftyDrivenExit(
   nowMs = Date.now(),
 ): Promise<boolean> {
   if (phase !== "in_position" || squareOffInFlight) return false;
-  if (tradeSlot === "fade-1405") return false;
   if (tradeSlot === "nine-fifteen") {
     if (await maybeNineFifteenIndexTargetExit(accessToken)) return true;
     if (await maybeNineFifteenOpenReclaimExit(accessToken)) return true;
@@ -4271,10 +4103,6 @@ async function mainLoop() {
     const sessionEarly = loadKiteSession();
 
     if (hasRanToday(ctx.dateIST) && phase !== "in_position" && phase !== "exiting") {
-      if (tradeSlot === "fade-1405") {
-        await tickInPosition(sessionEarly!.accessToken!, ctx.dateIST);
-        return;
-      }
       phase = "done";
       if (isInBotWsHours() && sessionEarly?.accessToken) {
         let recoveredPosition = false;
@@ -4289,16 +4117,8 @@ async function mainLoop() {
           return;
         }
         await ensureNiftyTicker(sessionEarly.accessToken, ctx.dateIST);
-        if (fade1405Enabled && !isFade1405LiveSettled()) {
-          await loadFade1405PrevRange(sessionEarly.accessToken, ctx.dateIST);
-        }
-        const fadeNote =
-          fade1405Enabled && !isFade1405LiveSettled() ? "14:05 fade at 14:06" : "";
-        const watching = fadeNote;
         message = isKiteTickerConnected()
-          ? watching
-            ? `Morning done · ${watching}`
-            : "Session complete · websocket live until 16:00"
+          ? "Session complete · websocket live until 16:00"
           : "Morning done · websocket reconnecting";
       } else if (isPastBotWsHours()) {
         haltBotTicker();
@@ -4857,8 +4677,6 @@ function buildStatusSnapshot(): NineSixteenBotStatus {
     pnlTrailArmPct: onNineFifteenLeg ? NINE_FIFTEEN_PNL_TRAIL_FIRST_TARGET_PCT : 0,
     pnlTrailStepPct: 0,
     nineFifteenEnabled,
-    fade1405Enabled,
-    fade1405Settled: isFade1405LiveSettled(),
     tradeSlot,
     nineFifteenMarkPrice,
     nineFifteenMarkAt: nineFifteenMarkAtLabel,
@@ -5048,11 +4866,6 @@ export function setNineSixteenBotEnabled(next: boolean) {
   scheduleNext();
 }
 
-export function setFade1405Enabled(next: boolean) {
-  fade1405Enabled = next;
-  pushLog(next ? "14:05 fade enabled" : "14:05 fade disabled", "info");
-}
-
 export function setNineFifteenBotEnabled(_next: boolean) {
   nineFifteenEnabled = true;
   startNineSixteenMonitorLoop();
@@ -5060,25 +4873,6 @@ export function setNineFifteenBotEnabled(_next: boolean) {
 }
 
 export function startNineSixteenBot() {
-  attachFade1405Live({
-    log: (message, type = "info") => pushLog(message, type),
-    onSkip: (reason) => {
-      const dateIst = getIndianMarketContext().dateIST;
-      void persistTradeLog(dateIst, "skipped", reason, { exitReason: reason });
-      concludeFade1405Trade(dateIst, reason, "info");
-    },
-    onEnter: async (setup, _entrySpot) => {
-      const session = loadKiteSession();
-      const dateIst = getIndianMarketContext().dateIST;
-      if (!session?.accessToken) return;
-      await tryEnterFade1405(session.accessToken, dateIst, setup);
-    },
-    onExit: async (reason, _exitSpot) => {
-      const session = loadKiteSession();
-      if (!session?.accessToken) return;
-      await squareOff(session.accessToken, reason);
-    },
-  });
   startNineSixteenLiveMonitor();
   startNineSixteenMonitorLoop();
   pushLog(

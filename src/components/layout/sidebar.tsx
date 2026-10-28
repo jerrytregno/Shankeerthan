@@ -14,7 +14,6 @@ const navItems = [
   { href: "/dashboard/nifty-rsi", label: "RSI", icon: LineChart },
   { href: "/dashboard/nifty-rsi-speed", label: "RSI Speed-O-Meter", icon: Gauge },
   { href: "/dashboard/win-backtest", label: "Win backtesting", icon: Trophy },
-  { href: "/dashboard/fade-1405-backtest", label: "14:05 fade backtest", icon: ChartColumn },
   { href: "/dashboard/log-test", label: "Log Test", icon: Activity },
   { href: "/dashboard/trades", label: "Trades", icon: History },
   { href: "/dashboard/portfolio", label: "Portfolio", icon: Wallet },

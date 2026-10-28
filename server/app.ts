@@ -26,9 +26,7 @@ import {
   listBotTradeLogs,
   setNineFifteenBotEnabled,
   setNineSixteenBotEnabled,
-  setFade1405Enabled,
 } from "./nine-sixteen-bot.js";
-import { ensureFade1405Backtest } from "./fade-1405-backtest.js";
 import {
   ensureHighMinus5Backtest,
   NINE_FIFTEEN_HIGH_MINUS5_DEFAULT_DAYS,
@@ -634,20 +632,6 @@ app.get("/api/kite/nifty-rsi-speed-backtest", async (req, res) => {
   }
 });
 
-app.get("/api/kite/fade-1405-backtest", async (req, res) => {
-  const accessToken = req.cookies[TOKEN_COOKIE];
-  if (!accessToken) return res.status(401).json({ error: "Not connected to Zerodha" });
-
-  const force = req.query.refresh === "1";
-  try {
-    const { data, cached } = await ensureFade1405Backtest(accessToken, force);
-    return res.json({ data, cached });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to build 14:05 fade backtest";
-    return res.status(502).json({ error: message });
-  }
-});
-
 app.get("/api/kite/win-backtest", async (req, res) => {
   const accessToken = req.cookies[TOKEN_COOKIE];
   if (!accessToken) return res.status(401).json({ error: "Not connected to Zerodha" });
@@ -955,16 +939,6 @@ app.post("/api/log-test/clear", (_req, res) => {
 
 app.post("/api/nine-sixteen/bot/toggle", async (req, res) => {
   setNineSixteenBotEnabled(req.body?.enabled === true);
-  try {
-    const data = await getNineSixteenBotStatusLive();
-    return res.json({ data });
-  } catch {
-    return res.json({ data: getNineSixteenBotStatus() });
-  }
-});
-
-app.post("/api/fade-1405/bot/toggle", async (req, res) => {
-  setFade1405Enabled(req.body?.enabled === true);
   try {
     const data = await getNineSixteenBotStatusLive();
     return res.json({ data });

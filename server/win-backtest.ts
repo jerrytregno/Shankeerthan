@@ -87,7 +87,7 @@ interface Setup {
   fixedDeadline: number;
 }
 
-type MethodKind = "clock" | "morning" | "afternoon";
+type MethodKind = "clock" | "morning";
 
 interface MethodDef {
   id: string;
@@ -152,19 +152,6 @@ const METHODS: MethodDef[] = [
     fixedStop: 40,
     fixedDeadline: 10 * 60,
     fixedLabel: "Old rule: take half of that extra push back by 10:00, stop 40",
-  },
-  {
-    id: "fade-1405",
-    label: "14:05 trend-day fade",
-    detail:
-      "At 14:05, if Nifty is 100+ points from the 9:15 open and today's range is already bigger than yesterday's, take the other side at the 14:06 open.",
-    kind: "afternoon",
-    time: 14 * 60 + 5,
-    minMove: 100,
-    fixedTarget: 10,
-    fixedStop: 25,
-    fixedDeadline: FLAT_EXIT,
-    fixedLabel: "Old rule: take 10 points, stop 25, flat at 3:20",
   },
 ];
 
@@ -436,55 +423,11 @@ function morningSetup(day: DayBars, method: MethodDef): Setup | null {
   return null;
 }
 
-function dayRange(day: DayBars, untilMin: number): number | null {
-  let high = -Infinity;
-  let low = Infinity;
-  for (let min = OPEN_MINS; min <= untilMin; min += 1) {
-    if (!hasBar(day, min)) continue;
-    if (day.h[min] > high) high = day.h[min];
-    if (day.l[min] < low) low = day.l[min];
-  }
-  return Number.isFinite(high) && Number.isFinite(low) ? high - low : null;
-}
-
-function afternoonSetup(day: DayBars, prevDay: DayBars | undefined, method: MethodDef): Setup | null {
-  const time = method.time ?? 0;
-  if (!prevDay || !hasBar(day, OPEN_MINS) || !hasBar(day, time)) return null;
-  const move = day.c[time] - day.o[OPEN_MINS];
-  if (Math.abs(move) < (method.minMove ?? 0)) return null;
-  const todayRange = dayRange(day, time);
-  const prevRange = dayRange(prevDay, DAY_MINS - 1);
-  if (todayRange == null || prevRange == null || todayRange <= prevRange) return null;
-  const entryMin = nextBar(day, time);
-  if (entryMin == null) return null;
-  const dir = (move > 0 ? -1 : 1) as 1 | -1;
-  const signed = round2(move);
-  return {
-    date: day.date,
-    weekday: formatWeekdayFromDateKey(day.date),
-    side: dir === 1 ? "call" : "put",
-    dir,
-    entryMin,
-    entry: day.o[entryMin],
-    signalPts: signed,
-    setupLabel: `from open ${signed > 0 ? "+" : ""}${signed.toFixed(1)}, range ${round2(todayRange).toFixed(0)} > ${round2(prevRange).toFixed(0)}`,
-    path: pathFrom(day, entryMin),
-    fixedTargetPts: method.fixedTarget ?? 10,
-    fixedStopPts: method.fixedStop,
-    fixedDeadline: method.fixedDeadline,
-  };
-}
-
 function setupsFor(method: MethodDef, days: DayBars[]): Setup[] {
   const setups: Setup[] = [];
   for (let index = 0; index < days.length; index += 1) {
     const day = days[index];
-    const setup =
-      method.kind === "clock"
-        ? clockSetup(day, method)
-        : method.kind === "morning"
-          ? morningSetup(day, method)
-          : afternoonSetup(day, days[index - 1], method);
+    const setup = method.kind === "clock" ? clockSetup(day, method) : morningSetup(day, method);
     if (setup && setup.path.length > 0) setups.push(setup);
   }
   return setups;
